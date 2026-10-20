@@ -41,6 +41,15 @@ wait_apt() {
 }
 
 install_base() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 \
+    && command -v git >/dev/null 2>&1 && command -v dig >/dev/null 2>&1 \
+    && docker info >/dev/null 2>&1; then
+    log "docker, git, and dig are already installed"
+    mkdir -p /opt/caddy /root/.ssh
+    chmod 700 /root/.ssh
+    write_hosts
+    return 0
+  fi
   wait_apt || true
   if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
     retry apt-get update -y
@@ -139,7 +148,13 @@ update_repo() {
     git -C "$dir" remote set-url origin "$url"
     git -C "$dir" fetch origin || return 1
   else
-    git clone --depth 1 "$url" "$dir" || return 1
+    if ! git clone --depth 1 "$url" "$dir"; then
+      log "clone failed for $public"
+      if [ -z "${GITHUB_TOKEN:-}" ]; then
+        log "GITHUB_TOKEN is empty. Export it in Cloud Shell and rerun setup-all.sh."
+      fi
+      return 1
+    fi
   fi
   if git -C "$dir" show-ref --verify --quiet refs/remotes/origin/main; then
     git -C "$dir" reset --hard origin/main
@@ -454,7 +469,15 @@ probe_https_list() {
   host="${list%%,*}"
   host="${host#"${host%%[![:space:]]*}"}"
   host="${host%"${host##*[![:space:]]}"}"
-  wait_https "$host"
+  if wait_https "$host"; then
+    return 0
+  fi
+  if [ "$MODE" = "pipeline" ]; then
+    log "HTTPS for ${host} is not ready yet. HTTP stays up and setup continues."
+    PIPE_HTTPS="pending"
+    return 0
+  fi
+  return 1
 }
 
 deploy_wesenseu() {
@@ -571,6 +594,10 @@ deploy_monitour() {
 
 deploy_enterweu() {
   local env=/opt/enterweu/.env.prod
+  if [ "${PIPELINE:-0}" = "1" ] && docker ps -a --format '{{.Names}}' | grep -qx enterweu_auth_service; then
+    MODE=https
+    log "EnterWeU is already installed. Refreshing containers without an image rebuild."
+  fi
   if [ "$MODE" = "https" ]; then
     log "HTTPS only. Containers are not rebuilt."
     if [ ! -f "$env" ]; then
@@ -584,7 +611,7 @@ deploy_enterweu() {
   local override=/tmp/enterweu-host-ports.yml
   local sibling
   sibling="$(cd "$(dirname "$0")" && pwd)/enterweu-host-ports.yml"
-  if [ -f "$sibling" ]; then
+  if [ -f "$sibling" ] && [ "$sibling" != "$override" ]; then
     cp "$sibling" "$override"
   fi
   if [ ! -f "$override" ]; then
@@ -620,6 +647,12 @@ deploy_enterweu() {
   set_kv "$env" OPENAI_API_KEY "${OPENAI_API_KEY:-}"
   publish_env "$env" /opt/enterweu/.env || return 1
   if [ "$MODE" != "https" ]; then
+    if [ "$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)" -ge 7000 ]; then
+      export COMPOSE_PROFILES=full
+      log "This VM has at least 7 GB. Kafka, Elasticsearch, and Mongo will start."
+    else
+      log "Under 7 GB. Kafka stays off. Partners call http://10.20.0.10 and receive webhooks on the private network."
+    fi
     export COMPOSE_PARALLEL_LIMIT=1
     compose_up docker compose -p enterweu --project-directory /opt/enterweu \
       --env-file "$env" \
@@ -633,9 +666,13 @@ deploy_enterweu() {
       -f /opt/enterweu/docker-compose.yml \
       -f /opt/enterweu/docker-compose.prod.yml \
       -f /tmp/enterweu-host-ports.yml \
-      up -d --no-build --force-recreate auth_service subscription_service consultancy_service || return 1
+      up -d --no-build --force-recreate \
+        auth_service user_service interview_service subscription_service \
+        consultancy_service admin_service content_service notification_service || return 1
   fi
-  quiet_enterweu
+  if [ "${COMPOSE_PROFILES:-}" != "full" ]; then
+    quiet_enterweu
+  fi
   wait_auth || return 1
   local ip web_hosts api_hosts
   ip=$(public_ip)
@@ -778,23 +815,98 @@ deploy_kitchcu() {
     bash /opt/ckac/infra/gcp-vm/update-prod.sh --already-updated || return 1
   fi
   if [ -n "${KITCHCU_HTTPS_HOST:-}" ]; then
-    wait_https "$KITCHCU_HTTPS_HOST" || return 1
+    if ! wait_https "$KITCHCU_HTTPS_HOST"; then
+      if [ "${PIPELINE:-0}" = "1" ]; then
+        log "HTTPS for ${KITCHCU_HTTPS_HOST} is not ready yet. HTTP stays up and setup continues."
+        PIPE_HTTPS="pending"
+      else
+        return 1
+      fi
+    fi
   fi
   wait_port80 || return 1
 }
 
+migrate_role() {
+  local n=0 svc
+  case "$ROLE" in
+    wesenseu)
+      docker compose -p wesenseu --project-directory /opt/wesenseu exec -T backend alembic upgrade head
+      ;;
+    monitour)
+      docker compose --project-directory /opt/monitour \
+        -f /opt/monitour/docker-compose.platform.yml \
+        -f /opt/monitour/docker-compose.monitour-only.yml \
+        --env-file /opt/monitour/.env.platform \
+        exec -T backend alembic upgrade head
+      ;;
+    kitchcu)
+      while [ "$n" -lt 30 ]; do
+        if curl -sf --max-time 8 http://127.0.0.1:18000/health/ready | grep -q '"identity"[[:space:]]*:[[:space:]]*true'; then
+          return 0
+        fi
+        n=$((n + 1))
+        sleep 6
+      done
+      log "kitchCU migrations have not reported identity=true yet"
+      return 1
+      ;;
+    enterweu)
+      for svc in auth_service user_service interview_service subscription_service consultancy_service admin_service content_service notification_service; do
+        n=0
+        while [ "$n" -lt 8 ]; do
+          if docker compose -p enterweu --project-directory /opt/enterweu \
+            --env-file /opt/enterweu/.env.prod \
+            -f /opt/enterweu/docker-compose.yml \
+            -f /opt/enterweu/docker-compose.prod.yml \
+            -f /tmp/enterweu-host-ports.yml \
+            exec -T "$svc" python manage.py migrate --noinput; then
+            break
+          fi
+          n=$((n + 1))
+          log "migrate $svc retry $n"
+          sleep 8
+        done
+        [ "$n" -lt 8 ] || return 1
+      done
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+seed_and_test() {
+  local script
+  script="$(cd "$(dirname "$0")" && pwd)/vm-test-seed.sh"
+  if [ ! -f "$script" ]; then
+    script=/tmp/vm-test-seed.sh
+  fi
+  if [ ! -f "$script" ]; then
+    log "vm-test-seed.sh is not on this VM"
+    return 1
+  fi
+  bash "$script" "$ROLE" both
+}
+
 run_deploy() {
   if [ -z "${ROLE:-}" ]; then
-    echo "Usage: vm-deploy-all.sh kitchcu|enterweu|monitour|wesenseu [full|https]" >&2
+    echo "Usage: vm-deploy-all.sh kitchcu|enterweu|monitour|wesenseu [full|https|pipeline]" >&2
     exit 2
   fi
   case "$MODE" in
-    full|https) ;;
+    full|https|pipeline) ;;
     *)
-      echo "Usage: vm-deploy-all.sh kitchcu|enterweu|monitour|wesenseu [full|https]" >&2
+      echo "Usage: vm-deploy-all.sh kitchcu|enterweu|monitour|wesenseu [full|https|pipeline]" >&2
       exit 2
       ;;
   esac
+
+  PIPELINE=0
+  PIPE_HTTPS="ok"
+  if [ "$MODE" = "pipeline" ]; then
+    PIPELINE=1
+  fi
 
   free=$(free_gb)
   if [ "${free:-0}" -lt 8 ]; then
@@ -813,8 +925,34 @@ run_deploy() {
   esac
   rc=$?
   ip=$(public_ip)
+  local setup="fail" migrate="skipped" seed="skipped" test="skipped" priv
+  if [ "$rc" -eq 0 ]; then
+    setup="ok"
+  fi
+  if [ "$PIPELINE" = "1" ] && [ "$rc" -eq 0 ]; then
+    if migrate_role; then
+      migrate="ok"
+    else
+      migrate="fail"
+    fi
+    if [ "$migrate" = "ok" ]; then
+      if seed_and_test; then
+        seed="ok"
+        test="ok"
+      else
+        seed="fail"
+        test="fail"
+      fi
+    fi
+  fi
+  priv=$(curl -sf -H "Metadata-Flavor: Google" \
+    http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/ip || true)
   log "finished exit=$rc external_ip=${ip:-unknown}"
-  exit "$rc"
+  echo "RESULT role=$ROLE setup=$setup migrate=$migrate https=${PIPE_HTTPS} seed=$seed test=$test public=${ip:-unknown} private=${priv:-unknown}"
+  if [ "$setup" != "ok" ] || [ "$migrate" = "fail" ] || [ "$seed" = "fail" ]; then
+    exit 1
+  fi
+  exit 0
 }
 
 if [ "${VM_DEPLOY_SOURCE_ONLY:-0}" != "1" ]; then

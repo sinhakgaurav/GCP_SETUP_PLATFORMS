@@ -34,4 +34,6 @@ The file CDN is the private bucket `gs://wesenseu-invocations` behind `https://f
 
 `test-and-seed.ps1` checks health and private-network reachability, then runs the seeder that already ships in that app. It does not wipe databases. kitchCU runs `infra/gcp-vm/bulk-seed.sh`. EnterWeU runs `infra/gcp-vm/seed-demo.sh`. Monitour runs `scripts/seed-all-platform.sh`. WesenseU runs `python -m app.db.seed_demo`. Pass `-Force` to set `BULK_FORCE=1` for WesenseU and Monitour. `-Local -Action test` probes the ports on this PC. The install itself does not seed.
 
+Cloud Shell runs all four VMs with `bash setup-all.sh` after `export GITHUB_TOKEN=...`. Each VM installs, migrates, starts Caddy, requests HTTPS for names that point at it, runs that app's seeder, then tests health. Docker is not reinstalled when it is already present. Volumes are kept. On a VM under 7 GB, Kafka, Elasticsearch, and Mongo stay off and the apps call each other at `http://10.20.0.10` through `http://10.20.0.13`.
+
 Requires the Google Cloud SDK and `gcloud auth login`. Link a billing account before the first deploy. Reruns keep disks, `.env` files, and the CDN key.

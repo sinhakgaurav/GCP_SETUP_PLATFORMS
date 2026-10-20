@@ -48,22 +48,33 @@ services:
     profiles: ["full"]
   auth_service:
     command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    environment:
+      DATABASE_URL: postgresql://enterweu_user:${POSTGRES_PASSWORD}@pgbouncer:5432/enterweu_db
     depends_on: !reset
       - pgbouncer
       - redis
       - subscription_service
   user_service:
+    environment:
+      DATABASE_URL: postgresql://enterweu_user:${POSTGRES_PASSWORD}@pgbouncer:5432/enterweu_db
+      TALENT_LEDGER_URL: postgresql://enterweu_user:${POSTGRES_TALENT_PASSWORD}@pgbouncer_talent:5432/enterweu_talent
     depends_on: !reset
       - pgbouncer
       - redis
       - pgbouncer_talent
       - subscription_service
   interview_service:
+    environment:
+      DATABASE_URL: postgresql://enterweu_user:${POSTGRES_PASSWORD}@pgbouncer:5432/enterweu_db
     depends_on: !reset
       - pgbouncer
       - redis
   subscription_service:
     command: ["sh", "-c", "python manage.py init_subscription_ledger --skip-copy || true; python manage.py seed_subscription_plans || true; exec python manage.py runserver 0.0.0.0:8000"]
+    environment:
+      DATABASE_URL: postgresql://enterweu_user:${POSTGRES_PASSWORD}@pgbouncer:5432/enterweu_db
+      SUBSCRIPTION_LEDGER_URL: postgresql://enterweu_user:${POSTGRES_LEDGER_PASSWORD}@pgbouncer_ledger:5432/enterweu_subscriptions
+      POSTGRES_ADMIN_URL: postgresql://enterweu_user:${POSTGRES_PASSWORD}@postgres:5432/enterweu_db
     depends_on: !reset
       - pgbouncer
       - redis
@@ -72,6 +83,10 @@ services:
       - pgbouncer_ledger
   consultancy_service:
     command: ["sh", "-c", "python manage.py init_talent_ledger --skip-copy || true; exec python manage.py runserver 0.0.0.0:8000"]
+    environment:
+      DATABASE_URL: postgresql://enterweu_user:${POSTGRES_PASSWORD}@pgbouncer:5432/enterweu_db
+      TALENT_LEDGER_URL: postgresql://enterweu_user:${POSTGRES_TALENT_PASSWORD}@pgbouncer_talent:5432/enterweu_talent
+      POSTGRES_ADMIN_URL: postgresql://enterweu_user:${POSTGRES_PASSWORD}@postgres:5432/enterweu_db
     depends_on: !reset
       - pgbouncer
       - redis
@@ -80,6 +95,9 @@ services:
       - pgbouncer_talent
       - subscription_service
   admin_service:
+    environment:
+      DATABASE_URL: postgresql://enterweu_user:${POSTGRES_PASSWORD}@pgbouncer:5432/enterweu_db
+      TALENT_LEDGER_URL: postgresql://enterweu_user:${POSTGRES_TALENT_PASSWORD}@pgbouncer_talent:5432/enterweu_talent
     depends_on: !reset
       - pgbouncer
       - redis
@@ -88,10 +106,14 @@ services:
       - pgbouncer_talent
       - subscription_service
   content_service:
+    environment:
+      DATABASE_URL: postgresql://enterweu_user:${POSTGRES_PASSWORD}@pgbouncer:5432/enterweu_db
     depends_on: !reset
       - pgbouncer
       - redis
   notification_service:
+    environment:
+      DATABASE_URL: postgresql://enterweu_user:${POSTGRES_PASSWORD}@pgbouncer:5432/enterweu_db
     depends_on: !reset
       - pgbouncer
       - redis

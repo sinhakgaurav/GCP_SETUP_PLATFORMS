@@ -77,4 +77,7 @@ grep -q "comprehensive_seeder" "$seed" && fail "EnterWeU comprehensive_seeder is
 grep -q "CKAC_BULK_KITCHENS" "$seed" && fail "kitchCU kitchen count is overridden"
 grep -q "HUGE_DAYS" "$seed" && fail "Monitour HUGE_DAYS is overridden"
 
+grep -q 'sibling" != "$override"' "$ROOT/vm-deploy-all.sh" || fail "copying the EnterWeU overlay onto itself is still allowed"
+grep -F -q 'enterweu_user:${POSTGRES_PASSWORD}@pgbouncer' "$ROOT/enterweu-host-ports.yml" || fail "EnterWeU still uses the hardcoded database password"
+
 echo "ok caddy-hosts"
