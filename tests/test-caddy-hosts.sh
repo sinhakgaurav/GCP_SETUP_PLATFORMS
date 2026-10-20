@@ -68,4 +68,13 @@ else
   fail "a kept service still depends on elasticsearch, mongo, or kafka"
 fi
 
+seed="$ROOT/vm-test-seed.sh"
+grep -q "infra/gcp-vm/bulk-seed.sh" "$seed" || fail "kitchCU seeder is not the app script"
+grep -q "infra/gcp-vm/seed-demo.sh" "$seed" || fail "EnterWeU seeder is not the app script"
+grep -q "scripts/seed-all-platform.sh" "$seed" || fail "Monitour seeder is not the app script"
+grep -q "python -m app.db.seed_demo" "$seed" || fail "WesenseU seeder is not the app module"
+grep -q "comprehensive_seeder" "$seed" && fail "EnterWeU comprehensive_seeder is not the app demo seeder"
+grep -q "CKAC_BULK_KITCHENS" "$seed" && fail "kitchCU kitchen count is overridden"
+grep -q "HUGE_DAYS" "$seed" && fail "Monitour HUGE_DAYS is overridden"
+
 echo "ok caddy-hosts"

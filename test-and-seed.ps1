@@ -82,11 +82,10 @@ function Write-Table {
 }
 
 Write-Host ""
-Write-Host "Action $Action. Seed loads demo rows and does not wipe databases."
-Write-Host "kitchCU uses its bulk seeder (10 kitchens, 3 months on an e2-small)."
-Write-Host "Monitour uses profile bulk with HUGE_DAYS=30. Pass -Force to refresh existing demo rows."
-Write-Host "EnterWeU runs manage.py comprehensive_seeder in auth_service."
-Write-Host "WesenseU runs app.db.seed_demo, which skips rows already present unless -Force."
+Write-Host "Action $Action. Seed runs the seeder that already ships in each app. It does not wipe databases."
+Write-Host "kitchCU: infra/gcp-vm/bulk-seed.sh. EnterWeU: infra/gcp-vm/seed-demo.sh."
+Write-Host "Monitour: scripts/seed-all-platform.sh. WesenseU: python -m app.db.seed_demo."
+Write-Host "Pass -Force to set BULK_FORCE=1 for the WesenseU and Monitour seeders."
 
 if ($PrintOnly) {
     $blank = foreach ($vm in $Vms) {
@@ -124,7 +123,8 @@ if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
 }
 
 Convert-ToUnixLf $RemoteScript
-$forceValue = $(if ($Force) { "1" } else { "0" })
+$forceEnv = ""
+if ($Force) { $forceEnv = "BULK_FORCE=1 " }
 
 foreach ($vm in $Vms) {
     if ($Target -and $vm.Role -ne $Target) { continue }
@@ -140,7 +140,7 @@ foreach ($vm in $Vms) {
         $rows += [pscustomobject]@{ Project = $vm.Role; PublicIp = $ip; Health = $health; Seed = $seed; Network = $network }
         continue
     }
-    $remote = "sudo mv ~/vm-test-seed.sh /root/vm-test-seed.sh && sudo chmod 755 /root/vm-test-seed.sh && sudo BULK_FORCE=$forceValue bash /root/vm-test-seed.sh $($vm.Role) $Action"
+    $remote = "sudo mv ~/vm-test-seed.sh /root/vm-test-seed.sh && sudo chmod 755 /root/vm-test-seed.sh && sudo ${forceEnv}bash /root/vm-test-seed.sh $($vm.Role) $Action"
     $output = & gcloud compute ssh $vm.Name --project=$Project --zone=$Zone --quiet --command=$remote 2>&1 | Out-String
     Write-Host $output
     $match = [regex]::Match($output, "RESULT role=\S+ health=(\S+) seed=(\S+) network=(\S+)")

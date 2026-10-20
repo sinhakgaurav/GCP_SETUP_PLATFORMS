@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# On one VM: probe health, optionally seed bulk demo data, probe again.
+# On one VM: probe health, optionally run that app's own seeder, probe again.
 # Does not wipe volumes and does not pass kitchCU --fresh.
+# Seed commands are the ones shipped in each repo:
+#   wesenseu  python -m app.db.seed_demo
+#   kitchcu   infra/gcp-vm/bulk-seed.sh
+#   enterweu  infra/gcp-vm/seed-demo.sh
+#   monitour  scripts/seed-all-platform.sh
 # Usage: vm-test-seed.sh wesenseu|kitchcu|enterweu|monitour test|seed|both
 set -u
 
 ROLE="${1:-}"
 ACTION="${2:-both}"
-FORCE="${BULK_FORCE:-0}"
 
 if [ -z "$ROLE" ]; then
   echo "Usage: vm-test-seed.sh ROLE test|seed|both" >&2
@@ -61,33 +65,28 @@ partner_reach() {
 }
 
 seed_wesenseu() {
-  docker compose -p wesenseu --project-directory /opt/wesenseu exec -T \
-    -e BULK_FORCE="$FORCE" backend python -m app.db.seed_demo
+  if [ -n "${BULK_FORCE:-}" ]; then
+    docker compose -p wesenseu --project-directory /opt/wesenseu exec -T \
+      -e BULK_FORCE="$BULK_FORCE" backend python -m app.db.seed_demo
+  else
+    docker compose -p wesenseu --project-directory /opt/wesenseu exec -T \
+      backend python -m app.db.seed_demo
+  fi
 }
 
 seed_kitchcu() {
-  export CKAC_BULK_KITCHENS="${CKAC_BULK_KITCHENS:-10}"
-  export CKAC_BULK_MONTHS="${CKAC_BULK_MONTHS:-3}"
-  export CKAC_BULK_FULL=1
   bash /opt/ckac/infra/gcp-vm/bulk-seed.sh
-  tail -n 20 /var/log/ckac-bulk-seed.log || true
+  local rc=$?
+  tail -n 20 /var/log/ckac-bulk-seed.log >&2 || true
+  return "$rc"
 }
 
 seed_enterweu() {
-  docker compose -p enterweu --project-directory /opt/enterweu \
-    --env-file /opt/enterweu/.env.prod \
-    -f /opt/enterweu/docker-compose.yml \
-    -f /opt/enterweu/docker-compose.prod.yml \
-    exec -T auth_service python manage.py comprehensive_seeder
+  bash /opt/enterweu/infra/gcp-vm/seed-demo.sh
 }
 
 seed_monitour() {
-  docker compose --project-directory /opt/monitour \
-    -f /opt/monitour/docker-compose.platform.yml \
-    -f /opt/monitour/docker-compose.monitour-only.yml \
-    --env-file /opt/monitour/.env.platform \
-    exec -T -e BULK_FORCE="$FORCE" -e HUGE_DAYS="${HUGE_DAYS:-30}" \
-    backend python -m app.db.seed_all_platform --profile bulk
+  bash /opt/monitour/scripts/seed-all-platform.sh
 }
 
 HEALTH="fail"
