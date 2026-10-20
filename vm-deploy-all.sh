@@ -312,7 +312,7 @@ matching_hosts() {
 
 wait_https() {
   local host="$1" n=0 code
-  while [ "$n" -lt 12 ]; do
+  while [ "$n" -lt 18 ]; do
     code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 \
       --resolve "${host}:443:127.0.0.1" "https://${host}/" || true)
     case "$code" in
@@ -472,8 +472,9 @@ probe_https_list() {
   if wait_https "$host"; then
     return 0
   fi
-  if [ "$MODE" = "pipeline" ]; then
+  if [ "${PIPELINE:-0}" = "1" ]; then
     log "HTTPS for ${host} is not ready yet. HTTP stays up and setup continues."
+    docker logs platform-caddy 2>&1 | tail -n 20 || true
     PIPE_HTTPS="pending"
     return 0
   fi
@@ -594,11 +595,14 @@ deploy_monitour() {
 
 deploy_enterweu() {
   local env=/opt/enterweu/.env.prod
-  if [ "${PIPELINE:-0}" = "1" ] && docker ps -a --format '{{.Names}}' | grep -qx enterweu_auth_service; then
-    MODE=https
+  local refresh=0
+  if [ "$MODE" = "https" ]; then
+    refresh=1
+  elif [ "${PIPELINE:-0}" = "1" ] && docker ps -a --format '{{.Names}}' | grep -qx enterweu_auth_service; then
+    refresh=1
     log "EnterWeU is already installed. Refreshing containers without an image rebuild."
   fi
-  if [ "$MODE" = "https" ]; then
+  if [ "$refresh" = "1" ]; then
     log "HTTPS only. Containers are not rebuilt."
     if [ ! -f "$env" ]; then
       log "No existing install. Run: vm-deploy-all.sh enterweu"
@@ -618,7 +622,7 @@ deploy_enterweu() {
     log "missing $override and $sibling"
     return 1
   fi
-  if [ "$MODE" != "https" ]; then
+  if [ "$refresh" != "1" ]; then
     copy_env_once /opt/enterweu/.env.prod /opt/enterweu/config/env.prod.example || return 1
   fi
   local key
@@ -646,7 +650,7 @@ deploy_enterweu() {
   set_kv "$env" WESENSEU_REQUIRE_LIVE "0"
   set_kv "$env" OPENAI_API_KEY "${OPENAI_API_KEY:-}"
   publish_env "$env" /opt/enterweu/.env || return 1
-  if [ "$MODE" != "https" ]; then
+  if [ "$refresh" != "1" ]; then
     if [ "$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)" -ge 7000 ]; then
       export COMPOSE_PROFILES=full
       log "This VM has at least 7 GB. Kafka, Elasticsearch, and Mongo will start."
