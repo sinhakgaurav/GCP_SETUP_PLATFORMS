@@ -171,6 +171,21 @@ copy_env_once() {
   log "created $(basename "$dest") from example"
 }
 
+publish_env() {
+  local src="$1"
+  shift
+  if [ ! -f "$src" ]; then
+    log "compose env source missing: $src"
+    return 1
+  fi
+  chmod 600 "$src"
+  local dest
+  for dest in "$@"; do
+    cp "$src" "$dest"
+    chmod 600 "$dest"
+  done
+}
+
 set_kv() {
   local file="$1" key="$2" value="$3"
   [ -n "$value" ] || return 0
@@ -357,6 +372,7 @@ EOF
   if [ -n "${CALLBACK_SECRET:-}" ]; then
     set_kv "$env" CALLBACK_SIGNING_SECRET "${CALLBACK_SECRET}"
   fi
+  publish_env "$env" /opt/wesenseu/.env || return 1
   compose_up docker compose -p wesenseu --project-directory /opt/wesenseu \
     -f /opt/wesenseu/docker-compose.yml \
     -f /opt/wesenseu/docker-compose.e2.yml \
@@ -375,6 +391,7 @@ deploy_monitour() {
   set_kv "$env" WESENSEU_API_URL "${WESENSEU_API_URL:-}"
   set_kv "$env" WESENSEU_API_KEY "${MONITOUR_API_KEY:-}"
   set_kv "$env" GOOGLE_MAPS_API_KEY "${GOOGLE_MAPS_API_KEY:-}"
+  publish_env "$env" /opt/monitour/.env || return 1
   compose_up docker compose --project-directory /opt/monitour \
     -f /opt/monitour/docker-compose.platform.yml \
     -f /opt/monitour/docker-compose.monitour-only.yml \
@@ -455,8 +472,7 @@ deploy_enterweu() {
   set_kv "$env" WESENSEU_REQUIRE_API_KEY "1"
   set_kv "$env" WESENSEU_REQUIRE_LIVE "0"
   set_kv "$env" OPENAI_API_KEY "${OPENAI_API_KEY:-}"
-  cp "$env" /opt/enterweu/.env
-  chmod 600 /opt/enterweu/.env
+  publish_env "$env" /opt/enterweu/.env || return 1
   export COMPOSE_PARALLEL_LIMIT=1
   compose_up docker compose -p enterweu --project-directory /opt/enterweu \
     --env-file "$env" \
@@ -552,6 +568,7 @@ deploy_kitchcu() {
   set_kv "$env" WESENSEU_API_URL "${WESENSEU_API_URL:-}"
   set_kv "$env" WESENSEU_API_KEY "${KITCHCU_API_KEY:-}"
   set_kv "$env" GOOGLE_MAPS_API_KEY "${GOOGLE_MAPS_API_KEY:-}"
+  publish_env "$env" /opt/ckac/.env || return 1
   local ip
   ip=$(public_ip)
   if [ -n "$ip" ] && dns_ok kitchcu.com "$ip"; then
