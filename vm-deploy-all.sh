@@ -8,7 +8,7 @@ export DOCKER_CLIENT_TIMEOUT=300
 export COMPOSE_HTTP_TIMEOUT=300
 
 ROLE="${1:-${ROLE:-}}"
-MODE="${2:-full}"
+MODE="${2:-${MODE:-full}}"
 ENV_FILE=/root/platform.env
 if [ -f "$ENV_FILE" ]; then
   set -a
@@ -17,19 +17,7 @@ if [ -f "$ENV_FILE" ]; then
   set +a
 fi
 
-if [ -z "$ROLE" ]; then
-  echo "Usage: vm-deploy-all.sh kitchcu|enterweu|monitour|wesenseu [full|https]" >&2
-  exit 2
-fi
-case "$MODE" in
-  full|https) ;;
-  *)
-    echo "Usage: vm-deploy-all.sh kitchcu|enterweu|monitour|wesenseu [full|https]" >&2
-    exit 2
-    ;;
-esac
-
-log() { echo "[$ROLE] $*"; }
+log() { echo "[${ROLE:-setup}] $*" >&2; }
 
 retry() {
   local n=0
@@ -66,7 +54,7 @@ install_base() {
     retry apt-get update -y
     retry apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   fi
-  if ! command -v git >/dev/null 2>&1; then
+  if ! command -v git >/dev/null 2>&1 || ! command -v dig >/dev/null 2>&1; then
     retry apt-get update -y
     retry apt-get install -y git curl dnsutils openssl
   fi
@@ -337,11 +325,45 @@ start_caddy() {
     -v caddy_config:/config \
     caddy:2
   sleep 3
-  if ! docker ps --filter name=^platform-caddy$ --filter status=running -q | grep -q .; then
+  if ! docker ps --format '{{.Names}}' | grep -qx platform-caddy; then
     log "platform-caddy exited"
     docker logs platform-caddy 2>&1 | tail -n 40 || true
     return 1
   fi
+}
+
+wait_port80() {
+  local n=0 code
+  while [ "$n" -lt 15 ]; do
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://127.0.0.1/ || true)
+    if [ -n "$code" ]; then
+      log "port 80 answered ${code}"
+      return 0
+    fi
+    n=$((n + 1))
+    sleep 2
+  done
+  log "port 80 is not accepting connections"
+  docker logs platform-caddy 2>&1 | tail -n 40 || true
+  return 1
+}
+
+wait_auth() {
+  local n=0 code=""
+  while [ "$n" -lt 30 ]; do
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8081/api/auth/login/ || true)
+    case "$code" in
+      200|400|401|403|404|405)
+        log "auth gateway answered ${code}"
+        return 0
+        ;;
+    esac
+    n=$((n + 1))
+    sleep 4
+  done
+  log "auth gateway still ${code:-down}"
+  docker logs --tail 40 enterweu_auth_service 2>&1 || true
+  return 1
 }
 
 wait_http() {
@@ -374,9 +396,11 @@ write_role_caddy() {
   if [ -n "$ip" ]; then
     names="${ip}, ${private}"
   fi
+  local dest="${CADDY_FILE:-/opt/caddy/Caddyfile}"
+  mkdir -p "$(dirname "$dest")"
   if [ -z "$web_hosts" ] && [ -z "$api_hosts" ]; then
     log "No public name points at ${ip:-this VM}. Caddy serves HTTP on port 80."
-    cat > /opt/caddy/Caddyfile <<EOF
+    cat > "$dest" <<EOF
 {
   email ${CADDY_EMAIL:-admin@kitchcu.com}
   auto_https off
@@ -407,7 +431,7 @@ EOF
       printf '%s {\n  encode gzip\n  reverse_proxy %s\n}\n' "$api_hosts" "$api_up"
     fi
     internal_site "$names" "$api_up" "$web_up"
-  } > /opt/caddy/Caddyfile
+  } > "$dest"
 }
 
 quiet_enterweu() {
@@ -501,6 +525,7 @@ deploy_wesenseu() {
       up -d --build || return 1
   fi
   start_caddy || return 1
+  wait_port80 || return 1
   wait_http "http://127.0.0.1:8011/health/live" || return 1
   probe_https_list "$web_hosts" || return 1
   probe_https_list "$api_hosts" || return 1
@@ -538,6 +563,7 @@ deploy_monitour() {
   api_hosts=$(matching_hosts "$ip" api.monitour.in)
   write_role_caddy "$ip" "${HOST_MONITOUR:-10.20.0.13}, monitour.internal" "127.0.0.1:8000" "127.0.0.1:3000" "$web_hosts" "$api_hosts"
   start_caddy || return 1
+  wait_port80 || return 1
   wait_http "http://127.0.0.1:8000/health" || wait_http "http://127.0.0.1:3000/" || return 1
   probe_https_list "$web_hosts" || return 1
   probe_https_list "$api_hosts" || return 1
@@ -556,8 +582,13 @@ deploy_enterweu() {
     update_repo /opt/enterweu https://github.com/sinhakgaurav/enterweu.git || return 1
   fi
   local override=/tmp/enterweu-host-ports.yml
+  local sibling
+  sibling="$(cd "$(dirname "$0")" && pwd)/enterweu-host-ports.yml"
+  if [ -f "$sibling" ]; then
+    cp "$sibling" "$override"
+  fi
   if [ ! -f "$override" ]; then
-    log "missing $override"
+    log "missing $override and $sibling"
     return 1
   fi
   if [ "$MODE" != "https" ]; then
@@ -602,15 +633,17 @@ deploy_enterweu() {
       -f /opt/enterweu/docker-compose.yml \
       -f /opt/enterweu/docker-compose.prod.yml \
       -f /tmp/enterweu-host-ports.yml \
-      up -d --no-build --force-recreate auth_service || return 1
+      up -d --no-build --force-recreate auth_service subscription_service consultancy_service || return 1
   fi
   quiet_enterweu
+  wait_auth || return 1
   local ip web_hosts api_hosts
   ip=$(public_ip)
   web_hosts=$(matching_hosts "$ip" enterweu.com www.enterweu.com)
   api_hosts=$(matching_hosts "$ip" api.enterweu.com)
   write_role_caddy "$ip" "${HOST_ENTERWEU:-10.20.0.12}, enterweu.internal" "127.0.0.1:8081" "127.0.0.1:3000" "$web_hosts" "$api_hosts"
   start_caddy || return 1
+  wait_port80 || return 1
   wait_http "http://127.0.0.1:3000/" || return 1
   probe_https_list "$web_hosts" || return 1
   probe_https_list "$api_hosts" || return 1
@@ -747,24 +780,43 @@ deploy_kitchcu() {
   if [ -n "${KITCHCU_HTTPS_HOST:-}" ]; then
     wait_https "$KITCHCU_HTTPS_HOST" || return 1
   fi
+  wait_port80 || return 1
 }
 
-free=$(free_gb)
-if [ "${free:-0}" -lt 8 ]; then
-  log "only ${free}GB free on /. The boot disk needs more free space before Docker builds."
-  exit 1
+run_deploy() {
+  if [ -z "${ROLE:-}" ]; then
+    echo "Usage: vm-deploy-all.sh kitchcu|enterweu|monitour|wesenseu [full|https]" >&2
+    exit 2
+  fi
+  case "$MODE" in
+    full|https) ;;
+    *)
+      echo "Usage: vm-deploy-all.sh kitchcu|enterweu|monitour|wesenseu [full|https]" >&2
+      exit 2
+      ;;
+  esac
+
+  free=$(free_gb)
+  if [ "${free:-0}" -lt 8 ]; then
+    log "only ${free}GB free on /. The boot disk needs more free space before Docker builds."
+    exit 1
+  fi
+
+  install_base || { log "docker install failed"; exit 1; }
+
+  case "$ROLE" in
+    wesenseu) deploy_wesenseu ;;
+    monitour) deploy_monitour ;;
+    enterweu) deploy_enterweu ;;
+    kitchcu) deploy_kitchcu ;;
+    *) echo "Unknown role $ROLE" >&2; exit 2 ;;
+  esac
+  rc=$?
+  ip=$(public_ip)
+  log "finished exit=$rc external_ip=${ip:-unknown}"
+  exit "$rc"
+}
+
+if [ "${VM_DEPLOY_SOURCE_ONLY:-0}" != "1" ]; then
+  run_deploy
 fi
-
-install_base || { log "docker install failed"; exit 1; }
-
-case "$ROLE" in
-  wesenseu) deploy_wesenseu ;;
-  monitour) deploy_monitour ;;
-  enterweu) deploy_enterweu ;;
-  kitchcu) deploy_kitchcu ;;
-  *) echo "Unknown role $ROLE" >&2; exit 2 ;;
-esac
-rc=$?
-ip=$(public_ip)
-log "finished exit=$rc external_ip=${ip:-unknown}"
-exit "$rc"

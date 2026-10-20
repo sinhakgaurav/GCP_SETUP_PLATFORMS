@@ -42,9 +42,56 @@ services:
     profiles: ["full"]
   outbox_worker:
     profiles: ["full"]
+  kb_feeder:
+    profiles: ["full"]
+  analysis_retrier:
+    profiles: ["full"]
   auth_service:
     command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
     depends_on: !reset
       - pgbouncer
       - redis
       - subscription_service
+  user_service:
+    depends_on: !reset
+      - pgbouncer
+      - redis
+      - pgbouncer_talent
+      - subscription_service
+  interview_service:
+    depends_on: !reset
+      - pgbouncer
+      - redis
+  subscription_service:
+    command: ["sh", "-c", "python manage.py init_subscription_ledger --skip-copy || true; python manage.py seed_subscription_plans || true; exec python manage.py runserver 0.0.0.0:8000"]
+    depends_on: !reset
+      - pgbouncer
+      - redis
+      - postgres
+      - postgres_ledger
+      - pgbouncer_ledger
+  consultancy_service:
+    command: ["sh", "-c", "python manage.py init_talent_ledger --skip-copy || true; exec python manage.py runserver 0.0.0.0:8000"]
+    depends_on: !reset
+      - pgbouncer
+      - redis
+      - postgres
+      - postgres_talent
+      - pgbouncer_talent
+      - subscription_service
+  admin_service:
+    depends_on: !reset
+      - pgbouncer
+      - redis
+      - postgres
+      - postgres_talent
+      - pgbouncer_talent
+      - subscription_service
+  content_service:
+    depends_on: !reset
+      - pgbouncer
+      - redis
+  notification_service:
+    depends_on: !reset
+      - pgbouncer
+      - redis

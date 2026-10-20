@@ -29,7 +29,15 @@ health_of() {
       curl -sf --max-time 8 "http://127.0.0.1:18000/health/ready" | grep -q '"status"'
       ;;
     enterweu)
-      http_ok "http://127.0.0.1:3000/" || http_ok "http://127.0.0.1:8081/"
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8081/api/auth/login/ || true)
+      case "$code" in
+        200|400|401|403|404|405) ;;
+        *)
+          log "auth login returned ${code:-down}"
+          return 1
+          ;;
+      esac
+      http_ok "http://127.0.0.1:3000/" || http_ok "http://127.0.0.1/"
       ;;
     monitour)
       http_ok "http://127.0.0.1:8000/health/ready" || http_ok "http://127.0.0.1:8000/health" || http_ok "http://127.0.0.1:3000/"
