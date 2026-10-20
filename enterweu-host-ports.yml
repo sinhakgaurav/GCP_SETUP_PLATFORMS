@@ -1,6 +1,8 @@
 # EnterWeU VM: Caddy owns 80 and 443. HAProxy stays on loopback.
-# Memory caps keep Elasticsearch, MongoDB, and Kafka from killing an e2-small.
-# Requires Docker Compose v2.24 or newer for !override.
+# Elasticsearch, Mongo, and Kafka stay in the "full" profile. Their memory
+# caps alone are larger than an e2-small, and a dead auth process makes nginx
+# return 502 on /api/auth/login/. Auth serves HTTP only; seeding is a separate step.
+# Requires Docker Compose v2.24 or newer for !override and !reset.
 
 services:
   haproxy:
@@ -8,12 +10,41 @@ services:
       - "127.0.0.1:18080:80"
       - "127.0.0.1:18404:8404"
   elasticsearch:
+    profiles: ["full"]
     mem_limit: 768m
   mongodb:
+    profiles: ["full"]
     mem_limit: 320m
   kafka:
+    profiles: ["full"]
     mem_limit: 480m
   zookeeper:
+    profiles: ["full"]
     mem_limit: 200m
   kafka-ui:
+    profiles: ["full"]
     mem_limit: 128m
+  video_service:
+    profiles: ["full"]
+  ai_service:
+    profiles: ["full"]
+  search_service:
+    profiles: ["full"]
+  event_service:
+    profiles: ["full"]
+  document_service:
+    profiles: ["full"]
+  payment_service:
+    profiles: ["full"]
+  analytics_service:
+    profiles: ["full"]
+  calendar_service:
+    profiles: ["full"]
+  outbox_worker:
+    profiles: ["full"]
+  auth_service:
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    depends_on: !reset
+      - pgbouncer
+      - redis
+      - subscription_service

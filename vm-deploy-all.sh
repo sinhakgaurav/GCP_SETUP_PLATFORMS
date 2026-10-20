@@ -410,6 +410,20 @@ EOF
   } > /opt/caddy/Caddyfile
 }
 
+quiet_enterweu() {
+  local name
+  for name in \
+    enterweu_elasticsearch enterweu_mongodb enterweu_zookeeper enterweu_kafka enterweu_kafka_ui \
+    enterweu_video_service enterweu_ai_service enterweu_search_service enterweu_event_service \
+    enterweu_document_service enterweu_payment_service enterweu_analytics_service \
+    enterweu_calendar_service enterweu_outbox_worker
+  do
+    docker update --restart=no "$name" >/dev/null 2>&1 || true
+    docker stop "$name" >/dev/null 2>&1 || true
+  done
+  log "stopped Elasticsearch, Mongo, Kafka, and the other full-profile services"
+}
+
 probe_https_list() {
   local list="$1" host
   [ -n "$list" ] || return 0
@@ -541,12 +555,12 @@ deploy_enterweu() {
     ensure_swap 4096
     update_repo /opt/enterweu https://github.com/sinhakgaurav/enterweu.git || return 1
   fi
+  local override=/tmp/enterweu-host-ports.yml
+  if [ ! -f "$override" ]; then
+    log "missing $override"
+    return 1
+  fi
   if [ "$MODE" != "https" ]; then
-    local override=/tmp/enterweu-host-ports.yml
-    if [ ! -f "$override" ]; then
-      log "missing $override"
-      return 1
-    fi
     copy_env_once /opt/enterweu/.env.prod /opt/enterweu/config/env.prod.example || return 1
   fi
   local key
@@ -582,7 +596,15 @@ deploy_enterweu() {
       -f /opt/enterweu/docker-compose.prod.yml \
       -f /tmp/enterweu-host-ports.yml \
       up -d --build || return 1
+  else
+    docker compose -p enterweu --project-directory /opt/enterweu \
+      --env-file "$env" \
+      -f /opt/enterweu/docker-compose.yml \
+      -f /opt/enterweu/docker-compose.prod.yml \
+      -f /tmp/enterweu-host-ports.yml \
+      up -d --no-build --force-recreate auth_service || return 1
   fi
+  quiet_enterweu
   local ip web_hosts api_hosts
   ip=$(public_ip)
   web_hosts=$(matching_hosts "$ip" enterweu.com www.enterweu.com)
