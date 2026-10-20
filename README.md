@@ -26,6 +26,8 @@ Private addresses:
 
 Partners call WesenseU at `http://10.20.0.10`. EnterWeU callbacks use `http://10.20.0.12`. The public firewall allows 80, 443, and 22. Application ports are open only inside `10.20.0.0/24`. Database ports stay closed.
 
+Caddy asks Let's Encrypt for each public name whose A record is that VM. A name that points somewhere else is left off the certificate, and the site stays on HTTP at the public IP. Fix the A record and rerun that VM to add it. kitchCU's certificate covers only the names that match, and it does not include the UAT hosts. Do not delete the `caddy_data` volume. Pass `https` as the second argument (`vm-deploy-all.sh enterweu https`) to refresh certificates without rebuilding images.
+
 The script enables Compute, Storage, OS Login, Logging, Monitoring, Certificate Manager, and the Maps APIs used by the apps: Geocoding, Places, Static Maps, and Maps JavaScript. The shared Maps key is printed at the end and written onto kitchCU and Monitour.
 
 The file CDN is the private bucket `gs://wesenseu-invocations` behind `https://files.wesenseu.com`. The signing key is printed once and stored in `keys\`, which is not committed. Platforms download with the signed URL WesenseU returns. They do not put that signing key on their own requests.
