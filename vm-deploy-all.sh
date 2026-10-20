@@ -455,6 +455,8 @@ deploy_enterweu() {
   set_kv "$env" WESENSEU_REQUIRE_API_KEY "1"
   set_kv "$env" WESENSEU_REQUIRE_LIVE "0"
   set_kv "$env" OPENAI_API_KEY "${OPENAI_API_KEY:-}"
+  cp "$env" /opt/enterweu/.env
+  chmod 600 /opt/enterweu/.env
   export COMPOSE_PARALLEL_LIMIT=1
   compose_up docker compose -p enterweu --project-directory /opt/enterweu \
     --env-file "$env" \
