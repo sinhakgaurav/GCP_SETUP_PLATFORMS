@@ -45,6 +45,7 @@ write_role_caddy "10.1.1.1" "10.20.0.12, enterweu.internal" "127.0.0.1:8081" "12
 grep -q "auto_https off" "$CADDY_FILE" && fail "HTTPS file disabled automatic HTTPS"
 grep -q "good.example, www.good.example" "$CADDY_FILE" || fail "web hosts missing"
 grep -q "redir @http https://{host}{uri} permanent" "$CADDY_FILE" || fail "HTTP is not forced to HTTPS"
+grep -q "path /api/" "$CADDY_FILE" || fail "the website host does not forward /api to the API"
 grep -q "api.good.example" "$CADDY_FILE" || fail "api host missing"
 grep -q "http://10.1.1.1" "$CADDY_FILE" || fail "public IP was not kept on HTTP"
 grep -q "http://enterweu.internal" "$CADDY_FILE" || fail "internal name was not marked HTTP"

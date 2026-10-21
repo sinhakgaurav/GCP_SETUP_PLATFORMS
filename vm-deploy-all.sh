@@ -446,7 +446,7 @@ EOF
     echo "  email ${CADDY_EMAIL:-admin@kitchcu.com}"
     echo "}"
     if [ -n "$web_hosts" ]; then
-      printf '%s {\n  @http protocol http\n  redir @http https://{host}{uri} permanent\n  encode gzip\n  reverse_proxy %s\n}\n' "$web_hosts" "$web_up"
+      printf '%s {\n  @http protocol http\n  redir @http https://{host}{uri} permanent\n  encode gzip\n  @api path /api/* /oauth/* /health* /docs* /redoc* /openapi.json /media/* /swagger*\n  handle @api {\n    reverse_proxy %s\n  }\n  handle {\n    reverse_proxy %s\n  }\n}\n' "$web_hosts" "$api_up" "$web_up"
     fi
     if [ -n "$api_hosts" ]; then
       printf '%s {\n  @http protocol http\n  redir @http https://{host}{uri} permanent\n  encode gzip\n  reverse_proxy %s\n}\n' "$api_hosts" "$api_up"
