@@ -44,6 +44,7 @@ write_role_caddy "10.1.1.1" "10.20.0.12, enterweu.internal" "127.0.0.1:8081" "12
   "good.example, www.good.example" "api.good.example"
 grep -q "auto_https off" "$CADDY_FILE" && fail "HTTPS file disabled automatic HTTPS"
 grep -q "good.example, www.good.example" "$CADDY_FILE" || fail "web hosts missing"
+grep -q "redir @http https://{host}{uri} permanent" "$CADDY_FILE" || fail "HTTP is not forced to HTTPS"
 grep -q "api.good.example" "$CADDY_FILE" || fail "api host missing"
 grep -q "http://10.1.1.1" "$CADDY_FILE" || fail "public IP was not kept on HTTP"
 grep -q "http://enterweu.internal" "$CADDY_FILE" || fail "internal name was not marked HTTP"
@@ -57,6 +58,7 @@ overlay="$ROOT/enterweu-host-ports.yml"
 grep -q 'profiles: \["full"\]' "$overlay" || fail "heavy services are not profile-gated"
 grep -q 'command: \["python", "manage.py", "runserver"' "$overlay" || fail "auth still seeds at boot"
 grep -q "init_subscription_ledger" "$overlay" || fail "subscription still runs the bulk seeder"
+grep -q '127.0.0.1:8081:80' "$overlay" || fail "EnterWeU nginx still owns public ports 80 and 443"
 if awk '
   $0 ~ /depends_on/ {on=1; next}
   on && $0 ~ /^  [^ ]/ {on=0}

@@ -446,10 +446,10 @@ EOF
     echo "  email ${CADDY_EMAIL:-admin@kitchcu.com}"
     echo "}"
     if [ -n "$web_hosts" ]; then
-      printf '%s {\n  encode gzip\n  reverse_proxy %s\n}\n' "$web_hosts" "$web_up"
+      printf '%s {\n  @http protocol http\n  redir @http https://{host}{uri} permanent\n  encode gzip\n  reverse_proxy %s\n}\n' "$web_hosts" "$web_up"
     fi
     if [ -n "$api_hosts" ]; then
-      printf '%s {\n  encode gzip\n  reverse_proxy %s\n}\n' "$api_hosts" "$api_up"
+      printf '%s {\n  @http protocol http\n  redir @http https://{host}{uri} permanent\n  encode gzip\n  reverse_proxy %s\n}\n' "$api_hosts" "$api_up"
     fi
     internal_site "$names" "$api_up" "$web_up"
   } > "$dest"
@@ -697,6 +697,12 @@ deploy_enterweu() {
     quiet_enterweu
   fi
   wait_auth || return 1
+  docker compose -p enterweu --project-directory /opt/enterweu \
+    --env-file "$env" \
+    -f /opt/enterweu/docker-compose.yml \
+    -f /opt/enterweu/docker-compose.prod.yml \
+    -f /tmp/enterweu-host-ports.yml \
+    up -d --no-build --force-recreate nginx haproxy || return 1
   local ip web_hosts api_hosts
   ip=$(public_ip)
   web_hosts=$(matching_hosts "$ip" enterweu.com www.enterweu.com)
@@ -770,6 +776,9 @@ write_kitchcu_caddy() {
 }
 
 ${hosts} {
+	@http protocol http
+	redir @http https://{host}{uri} permanent
+
 	@portal host kitchcu.com www.kitchcu.com
 	handle @portal {
 		reverse_proxy portal-web:80
@@ -846,6 +855,8 @@ deploy_kitchcu() {
       docker compose -p gcp-vm -f /opt/ckac/infra/gcp-vm/docker-compose.prod.yml \
         --env-file "$env" up -d --no-build --force-recreate identity || return 1
     fi
+    docker compose -p gcp-vm -f /opt/ckac/infra/gcp-vm/docker-compose.prod.yml \
+      --env-file "$env" up -d --no-build --force-recreate caddy || return 1
   fi
   if [ -n "${KITCHCU_HTTPS_HOST:-}" ]; then
     if ! wait_https "$KITCHCU_HTTPS_HOST"; then

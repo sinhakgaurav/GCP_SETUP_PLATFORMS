@@ -9,6 +9,11 @@ services:
     ports: !override
       - "127.0.0.1:18080:80"
       - "127.0.0.1:18404:8404"
+  # docker-compose.prod.yml publishes nginx on 80 and 443. That blocks Caddy,
+  # so the public site stays on HTTP and HTTPS never listens.
+  nginx:
+    ports: !override
+      - "127.0.0.1:8081:80"
   elasticsearch:
     profiles: ["full"]
     mem_limit: 768m
