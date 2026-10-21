@@ -582,6 +582,7 @@ deploy_monitour() {
       log "No existing install. Run: vm-deploy-all.sh monitour"
       return 1
     fi
+    update_repo /opt/monitour https://github.com/sinhakgaurav/monitour.git || return 1
   else
     ensure_swap 2048
     update_repo /opt/monitour https://github.com/sinhakgaurav/monitour.git || return 1
@@ -593,7 +594,17 @@ deploy_monitour() {
   set_kv "$env" WESENSEU_API_KEY "${MONITOUR_API_KEY:-}"
   set_kv "$env" GOOGLE_MAPS_API_KEY "${GOOGLE_MAPS_API_KEY:-}"
   publish_env "$env" /opt/monitour/.env || return 1
-  if [ "$MODE" != "https" ]; then
+  if [ "$MODE" = "https" ]; then
+    log "Starting the Monitour app from images already on this VM."
+    compose_up docker compose --project-directory /opt/monitour \
+      -f /opt/monitour/docker-compose.platform.yml \
+      -f /opt/monitour/docker-compose.monitour-only.yml \
+      --env-file "$env" \
+      up -d --no-build || {
+        log "Monitour images are not built yet. Run: bash setup-all.sh monitour pipeline"
+        return 1
+      }
+  else
     compose_up docker compose --project-directory /opt/monitour \
       -f /opt/monitour/docker-compose.platform.yml \
       -f /opt/monitour/docker-compose.monitour-only.yml \
