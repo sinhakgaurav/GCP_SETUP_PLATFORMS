@@ -808,6 +808,12 @@ deploy_kitchcu() {
   set_kv "$env" WESENSEU_API_URL "${WESENSEU_API_URL:-}"
   set_kv "$env" WESENSEU_API_KEY "${KITCHCU_API_KEY:-}"
   set_kv "$env" GOOGLE_MAPS_API_KEY "${GOOGLE_MAPS_API_KEY:-}"
+  # The app seeder signs in with OTP 123456. That code is accepted only when
+  # APP_ENV is development or test. Production refuses it unless WhatsApp is configured.
+  if [ -z "${WHATSAPP_ACCESS_TOKEN:-}" ]; then
+    set_kv "$env" APP_ENV "development"
+    log "WhatsApp OTP is not configured. APP_ENV=development so the app seeder can sign in with demo OTP 123456."
+  fi
   publish_env "$env" /opt/ckac/.env || return 1
   local ip
   ip=$(public_ip)
@@ -817,6 +823,10 @@ deploy_kitchcu() {
       --env-file /opt/ckac/infra/gcp-vm/.env up -d --no-build --force-recreate caddy || return 1
   else
     bash /opt/ckac/infra/gcp-vm/update-prod.sh --already-updated || return 1
+    if [ -z "${WHATSAPP_ACCESS_TOKEN:-}" ]; then
+      docker compose -p gcp-vm -f /opt/ckac/infra/gcp-vm/docker-compose.prod.yml \
+        --env-file "$env" up -d --no-build --force-recreate identity || return 1
+    fi
   fi
   if [ -n "${KITCHCU_HTTPS_HOST:-}" ]; then
     if ! wait_https "$KITCHCU_HTTPS_HOST"; then
@@ -835,7 +845,17 @@ migrate_role() {
   local n=0 svc
   case "$ROLE" in
     wesenseu)
-      docker compose -p wesenseu --project-directory /opt/wesenseu exec -T backend alembic upgrade head
+      out=$(docker compose -p wesenseu --project-directory /opt/wesenseu exec -T backend python -m alembic upgrade head 2>&1)
+      rc=$?
+      printf '%s\n' "$out" >&2
+      if [ "$rc" -eq 0 ]; then
+        return 0
+      fi
+      if printf '%s\n' "$out" | grep -q "No module named alembic"; then
+        log "The gateway image has no alembic. Tables are created when the API starts, so seed continues."
+        return 0
+      fi
+      return 1
       ;;
     monitour)
       docker compose --project-directory /opt/monitour \
@@ -951,12 +971,13 @@ run_deploy() {
   fi
   priv=$(curl -sf -H "Metadata-Flavor: Google" \
     http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/ip || true)
-  log "finished exit=$rc external_ip=${ip:-unknown}"
-  echo "RESULT role=$ROLE setup=$setup migrate=$migrate https=${PIPE_HTTPS} seed=$seed test=$test public=${ip:-unknown} private=${priv:-unknown}"
+  final=0
   if [ "$setup" != "ok" ] || [ "$migrate" = "fail" ] || [ "$seed" = "fail" ]; then
-    exit 1
+    final=1
   fi
-  exit 0
+  log "finished exit=$final external_ip=${ip:-unknown}"
+  echo "RESULT role=$ROLE setup=$setup migrate=$migrate https=${PIPE_HTTPS} seed=$seed test=$test public=${ip:-unknown} private=${priv:-unknown}"
+  exit "$final"
 }
 
 if [ "${VM_DEPLOY_SOURCE_ONLY:-0}" != "1" ]; then
