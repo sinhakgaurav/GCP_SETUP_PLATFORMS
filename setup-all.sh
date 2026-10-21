@@ -73,7 +73,7 @@ for item in "${VMS[@]}"; do
   printf '%s\n' "$output"
   line="$(printf '%s\n' "$output" | grep '^RESULT ' | tail -n 1 || true)"
   if [ -z "$line" ]; then
-    line="RESULT role=$role setup=fail migrate=skipped https=skipped seed=skipped test=skipped public=unknown private=unknown"
+    line="RESULT role=$role setup=fail migrate=skipped https=skipped seed=skipped test=skipped weekly=skipped public=unknown private=unknown"
   fi
   results="${results}${line}"$'\n'
 done
@@ -84,8 +84,8 @@ if [ -n "$ONLY_ROLE" ] && [ "$ran" -eq 0 ]; then
 fi
 
 echo ""
-printf '%-12s %-16s %-16s %-8s %-8s %-8s %-8s %-8s\n' \
-  PROJECT PUBLIC PRIVATE SETUP MIGRATE HTTPS SEED TEST
+printf '%-12s %-16s %-16s %-8s %-8s %-8s %-8s %-8s %-8s\n' \
+  PROJECT PUBLIC PRIVATE SETUP MIGRATE HTTPS SEED TEST WEEKLY
 failed=0
 while IFS= read -r line; do
   [ -n "$line" ] || continue
@@ -97,9 +97,10 @@ while IFS= read -r line; do
   https="$(printf '%s\n' "$line" | sed -n 's/.*https=\([^ ]*\).*/\1/p')"
   seed="$(printf '%s\n' "$line" | sed -n 's/.*seed=\([^ ]*\).*/\1/p')"
   test="$(printf '%s\n' "$line" | sed -n 's/.*test=\([^ ]*\).*/\1/p')"
-  printf '%-12s %-16s %-16s %-8s %-8s %-8s %-8s %-8s\n' \
-    "$role" "$public" "$private" "$setup" "$migrate" "$https" "$seed" "$test"
-  if [ "$setup" != "ok" ] || [ "$migrate" = "fail" ] || [ "$seed" = "fail" ] || [ "$test" = "fail" ]; then
+  weekly="$(printf '%s\n' "$line" | sed -n 's/.*weekly=\([^ ]*\).*/\1/p')"
+  printf '%-12s %-16s %-16s %-8s %-8s %-8s %-8s %-8s %-8s\n' \
+    "$role" "$public" "$private" "$setup" "$migrate" "$https" "$seed" "$test" "${weekly:-skipped}"
+  if [ "$setup" != "ok" ] || [ "$migrate" = "fail" ] || [ "$seed" = "fail" ] || [ "$test" = "fail" ] || [ "$weekly" = "fail" ]; then
     failed=1
   fi
 done <<EOF

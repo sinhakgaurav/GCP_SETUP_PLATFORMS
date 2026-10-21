@@ -86,6 +86,11 @@ grep -q "No module named alembic" "$ROOT/vm-deploy-all.sh" || fail "WesenseU sti
 grep -q "alembic stamp head" "$ROOT/vm-deploy-all.sh" || fail "WesenseU does not stamp an existing schema"
 grep -q "WESENSEU_REQUIREMENTS=requirements-cloud.txt" "$ROOT/vm-deploy-all.sh" || fail "WesenseU still builds the CUDA image"
 grep -q "monitour pipeline" "$ROOT/vm-deploy-all.sh" || fail "Monitour HTTPS does not say when the app image is missing"
+grep -q "enable_weekly_timer" "$ROOT/vm-deploy-all.sh" || fail "weekly data timers are not installed"
+grep -q "kitchcu-weekly-seed.timer" "$ROOT/vm-deploy-all.sh" || fail "kitchCU weekly timer is not enabled"
+grep -q "enterweu-weekly-seed.timer" "$ROOT/vm-deploy-all.sh" || fail "EnterWeU weekly timer is not enabled"
+grep -q "monitour-weekly-seed.timer" "$ROOT/vm-deploy-all.sh" || fail "Monitour weekly timer is not enabled"
+grep -q "already installed. Refreshing containers" "$ROOT/vm-deploy-all.sh" && fail "pipeline still skips the EnterWeU image rebuild"
 grep -q "wesenseu.com www.wesenseu.com" "$ROOT/vm-deploy-all.sh" || fail "wesenseu.com is not on the certificate list"
 grep -F -q 'enterweu_user:${POSTGRES_PASSWORD}@pgbouncer' "$ROOT/enterweu-host-ports.yml" || fail "EnterWeU still uses the hardcoded database password"
 

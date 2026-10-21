@@ -574,6 +574,19 @@ deploy_wesenseu() {
   probe_https_list "$api_hosts" || return 1
 }
 
+enable_weekly_timer() {
+  local unit_dir="$1" service="$2" timer="$3"
+  if [ ! -f "$unit_dir/$service" ] || [ ! -f "$unit_dir/$timer" ]; then
+    log "Weekly timer files are missing in $unit_dir"
+    return 1
+  fi
+  install -m 0644 "$unit_dir/$service" /etc/systemd/system/
+  install -m 0644 "$unit_dir/$timer" /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable --now "$timer"
+  log "Weekly timer: $(systemctl list-timers "$timer" --no-pager --no-legend || true)"
+}
+
 deploy_monitour() {
   local env=/opt/monitour/.env.platform
   if [ "$MODE" = "https" ]; then
@@ -628,9 +641,6 @@ deploy_enterweu() {
   local refresh=0
   if [ "$MODE" = "https" ]; then
     refresh=1
-  elif [ "${PIPELINE:-0}" = "1" ] && docker ps -a --format '{{.Names}}' | grep -qx enterweu_auth_service; then
-    refresh=1
-    log "EnterWeU is already installed. Refreshing containers without an image rebuild."
   fi
   if [ "$refresh" = "1" ]; then
     log "HTTPS only. Containers are not rebuilt."
@@ -638,6 +648,7 @@ deploy_enterweu() {
       log "No existing install. Run: vm-deploy-all.sh enterweu"
       return 1
     fi
+    update_repo /opt/enterweu https://github.com/sinhakgaurav/enterweu.git || return 1
   else
     ensure_swap 4096
     update_repo /opt/enterweu https://github.com/sinhakgaurav/enterweu.git || return 1
@@ -839,6 +850,7 @@ deploy_kitchcu() {
       log "No existing install. Run: vm-deploy-all.sh kitchcu"
       return 1
     fi
+    update_repo /opt/ckac https://github.com/sinhakgaurav/kitchcu.git || return 1
   else
     ensure_swap 2048
     update_repo /opt/ckac https://github.com/sinhakgaurav/kitchcu.git || return 1
@@ -999,7 +1011,7 @@ run_deploy() {
   esac
   rc=$?
   ip=$(public_ip)
-  local setup="fail" migrate="skipped" seed="skipped" test="skipped" priv
+  local setup="fail" migrate="skipped" seed="skipped" test="skipped" weekly="skipped" priv
   if [ "$rc" -eq 0 ]; then
     setup="ok"
   fi
@@ -1019,14 +1031,27 @@ run_deploy() {
       fi
     fi
   fi
+  if [ "$setup" = "ok" ]; then
+    case "$ROLE" in
+      monitour)
+        enable_weekly_timer /opt/monitour/scripts/systemd monitour-weekly-seed.service monitour-weekly-seed.timer && weekly="ok" || weekly="fail"
+        ;;
+      enterweu)
+        enable_weekly_timer /opt/enterweu/infra/gcp-vm enterweu-weekly-seed.service enterweu-weekly-seed.timer && weekly="ok" || weekly="fail"
+        ;;
+      kitchcu)
+        enable_weekly_timer /opt/ckac/infra/gcp-vm kitchcu-weekly-seed.service kitchcu-weekly-seed.timer && weekly="ok" || weekly="fail"
+        ;;
+    esac
+  fi
   priv=$(curl -sf -H "Metadata-Flavor: Google" \
     http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/ip || true)
   final=0
-  if [ "$setup" != "ok" ] || [ "$migrate" = "fail" ] || [ "$seed" = "fail" ]; then
+  if [ "$setup" != "ok" ] || [ "$migrate" = "fail" ] || [ "$seed" = "fail" ] || [ "$weekly" = "fail" ]; then
     final=1
   fi
   log "finished exit=$final external_ip=${ip:-unknown}"
-  echo "RESULT role=$ROLE setup=$setup migrate=$migrate https=${PIPE_HTTPS} seed=$seed test=$test public=${ip:-unknown} private=${priv:-unknown}"
+  echo "RESULT role=$ROLE setup=$setup migrate=$migrate https=${PIPE_HTTPS} seed=$seed test=$test weekly=$weekly public=${ip:-unknown} private=${priv:-unknown}"
   exit "$final"
 }
 
