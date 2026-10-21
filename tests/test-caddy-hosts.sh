@@ -80,6 +80,8 @@ grep -q "HUGE_DAYS" "$seed" && fail "Monitour HUGE_DAYS is overridden"
 grep -q 'sibling" != "$override"' "$ROOT/vm-deploy-all.sh" || fail "copying the EnterWeU overlay onto itself is still allowed"
 grep -q 'APP_ENV "development"' "$ROOT/vm-deploy-all.sh" || fail "kitchCU seed still requires WhatsApp when no token is set"
 grep -q "No module named alembic" "$ROOT/vm-deploy-all.sh" || fail "WesenseU still stops seed when the image has no alembic"
+grep -q "alembic stamp head" "$ROOT/vm-deploy-all.sh" || fail "WesenseU does not stamp an existing schema"
+grep -q "WESENSEU_REQUIREMENTS=requirements-cloud.txt" "$ROOT/vm-deploy-all.sh" || fail "WesenseU still builds the CUDA image"
 grep -q "wesenseu.com www.wesenseu.com" "$ROOT/vm-deploy-all.sh" || fail "wesenseu.com is not on the certificate list"
 grep -F -q 'enterweu_user:${POSTGRES_PASSWORD}@pgbouncer' "$ROOT/enterweu-host-ports.yml" || fail "EnterWeU still uses the hardcoded database password"
 

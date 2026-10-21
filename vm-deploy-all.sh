@@ -114,6 +114,12 @@ free_gb() {
   df -BG / | awk 'NR==2 {gsub(/G/,"",$4); print $4}'
 }
 
+reclaim_build_cache() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker builder prune -af >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
+}
+
 repo_url() {
   local https="$1"
   if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -544,7 +550,18 @@ deploy_wesenseu() {
     set_kv "$env" CALLBACK_SIGNING_SECRET "${CALLBACK_SECRET}"
   fi
   publish_env "$env" /opt/wesenseu/.env || return 1
+  # The full requirements file installs Whisper, DeepFace, and the CUDA stack.
+  # That image does not fit the 40GB gateway disk. The cloud file is the API only.
+  export WESENSEU_REQUIREMENTS=requirements-cloud.txt
   if [ "$MODE" != "https" ]; then
+    reclaim_build_cache
+    free=$(free_gb)
+    if [ "${free:-0}" -lt 12 ]; then
+      log "Free space is ${free}GB. Removing the previous backend image before the smaller cloud build."
+      docker rm -f wesenseu-backend-1 >/dev/null 2>&1 || true
+      docker rmi -f wesenseu-backend:latest >/dev/null 2>&1 || true
+      reclaim_build_cache
+    fi
     compose_up docker compose -p wesenseu --project-directory /opt/wesenseu \
       -f /opt/wesenseu/docker-compose.yml \
       -f /opt/wesenseu/docker-compose.e2.yml \
@@ -857,6 +874,11 @@ migrate_role() {
         log "The gateway image has no alembic. Tables are created when the API starts, so seed continues."
         return 0
       fi
+      if printf '%s\n' "$out" | grep -q "already exists"; then
+        log "Tables already exist from API startup. Stamping alembic at head so seed can continue."
+        docker compose -p wesenseu --project-directory /opt/wesenseu exec -T backend python -m alembic stamp head
+        return $?
+      fi
       return 1
       ;;
     monitour)
@@ -934,10 +956,14 @@ run_deploy() {
     PIPELINE=1
   fi
 
+  reclaim_build_cache
   free=$(free_gb)
-  if [ "${free:-0}" -lt 8 ]; then
+  if [ "${free:-0}" -lt 8 ] && [ "$ROLE" != "wesenseu" ]; then
     log "only ${free}GB free on /. The boot disk needs more free space before Docker builds."
     exit 1
+  fi
+  if [ "${free:-0}" -lt 8 ]; then
+    log "only ${free}GB free. WesenseU will drop the large vision image and build the cloud requirements."
   fi
 
   install_base || { log "docker install failed"; exit 1; }
