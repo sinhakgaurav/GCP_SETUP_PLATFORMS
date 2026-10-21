@@ -5,11 +5,22 @@
 #
 #   export GITHUB_TOKEN=...    # repo scope; the script never prints it
 #   bash setup-all.sh
+#   bash setup-all.sh wesenseu https
+#   bash setup-all.sh monitour pipeline
 set -u
 
 PROJECT="${PROJECT:-narad-wesenseu}"
 ZONE="${ZONE:-asia-south1-a}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+ONLY_ROLE="${1:-}"
+ONLY_MODE="${2:-pipeline}"
+case "$ONLY_MODE" in
+  full|https|pipeline) ;;
+  *)
+    echo "Usage: setup-all.sh [kitchcu|enterweu|monitour|wesenseu] [full|https|pipeline]" >&2
+    exit 2
+    ;;
+esac
 
 if [ -z "${GITHUB_TOKEN:-}" ]; then
   echo "Export GITHUB_TOKEN in this Cloud Shell first. GitHub rejected anonymous clone." >&2
@@ -41,15 +52,20 @@ run_vm() {
     "$ROOT/vm-deploy-all.sh" "$ROOT/vm-test-seed.sh" "$ROOT/enterweu-host-ports.yml" \
     "$vm:/tmp/" --project="$PROJECT" --zone="$ZONE"
   gcloud compute ssh "$vm" --project="$PROJECT" --zone="$ZONE" \
-    --command="sudo bash /tmp/vm-deploy-all.sh $role pipeline"
+    --command="sudo bash /tmp/vm-deploy-all.sh $role $ONLY_MODE"
 }
 
 echo "Project $PROJECT zone $ZONE"
 echo "Private network: wesenseu 10.20.0.10, kitchcu 10.20.0.11, enterweu 10.20.0.12, monitour 10.20.0.13"
 results=""
+ran=0
 for item in "${VMS[@]}"; do
   vm="${item%% *}"
   role="${item##* }"
+  if [ -n "$ONLY_ROLE" ] && [ "$role" != "$ONLY_ROLE" ]; then
+    continue
+  fi
+  ran=1
   echo ""
   echo "===== $role ($vm) ====="
   stamp_token "$vm" || true
@@ -61,6 +77,11 @@ for item in "${VMS[@]}"; do
   fi
   results="${results}${line}"$'\n'
 done
+
+if [ -n "$ONLY_ROLE" ] && [ "$ran" -eq 0 ]; then
+  echo "Unknown project: $ONLY_ROLE" >&2
+  exit 2
+fi
 
 echo ""
 printf '%-12s %-16s %-16s %-8s %-8s %-8s %-8s %-8s\n' \

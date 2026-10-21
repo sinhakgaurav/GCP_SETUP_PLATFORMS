@@ -517,10 +517,12 @@ deploy_wesenseu() {
   set_kv "$env" GOOGLE_MAPS_API_KEY "${GOOGLE_MAPS_API_KEY:-}"
   local internal_names="${HOST_WESENSEU:-10.20.0.10}, wesenseu.internal"
   local web_hosts api_hosts
-  web_hosts=$(matching_hosts "$ip" wesenseu.kitchcu.com)
+  web_hosts=$(matching_hosts "$ip" wesenseu.com www.wesenseu.com wesenseu.kitchcu.com)
   api_hosts=$(matching_hosts "$ip" api.wesenseu.com)
   if [ -n "$web_hosts" ]; then
-    site="https://wesenseu.kitchcu.com"
+    site="${web_hosts%%,*}"
+    site="${site#"${site%%[![:space:]]*}"}"
+    site="https://${site}"
   else
     site="http://${ip}"
   fi
