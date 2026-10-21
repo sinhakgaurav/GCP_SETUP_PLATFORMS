@@ -5,15 +5,24 @@
 #
 #   export GITHUB_TOKEN=...    # repo scope; the script never prints it
 #   bash setup-all.sh
+#   bash setup-all.sh recreate          # delete the four VMs and their boot disks, create e2-medium, then pipeline
 #   bash setup-all.sh wesenseu https
 #   bash setup-all.sh monitour pipeline
 set -u
 
 PROJECT="${PROJECT:-narad-wesenseu}"
 ZONE="${ZONE:-asia-south1-a}"
+REGION="${ZONE%-*}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-ONLY_ROLE="${1:-}"
-ONLY_MODE="${2:-pipeline}"
+RECREATE=0
+if [ "${1:-}" = "recreate" ]; then
+  RECREATE=1
+  ONLY_ROLE="${2:-}"
+  ONLY_MODE="${3:-pipeline}"
+else
+  ONLY_ROLE="${1:-}"
+  ONLY_MODE="${2:-pipeline}"
+fi
 case "$ONLY_MODE" in
   full|https|pipeline) ;;
   *)
@@ -164,6 +173,89 @@ vm_for_role() {
   esac
 }
 
+disk_for_role() {
+  case "$1" in
+    wesenseu|monitour) printf '%s\n' 40GB ;;
+    kitchcu|enterweu) printf '%s\n' 50GB ;;
+  esac
+}
+
+private_for_role() {
+  case "$1" in
+    wesenseu) printf '%s\n' 10.20.0.10 ;;
+    kitchcu) printf '%s\n' 10.20.0.11 ;;
+    enterweu) printf '%s\n' 10.20.0.12 ;;
+    monitour) printf '%s\n' 10.20.0.13 ;;
+  esac
+}
+
+save_platform_env() {
+  local name="$1" dest="$2"
+  gcloud compute ssh "$name" --project="$PROJECT" --zone="$ZONE" --command \
+    "sudo cp /root/platform.env /tmp/platform.env.recreate && sudo chmod 644 /tmp/platform.env.recreate" \
+    || return 1
+  gcloud compute scp "$name:/tmp/platform.env.recreate" "$dest" --project="$PROJECT" --zone="$ZONE" || return 1
+  chmod 600 "$dest"
+  gcloud compute ssh "$name" --project="$PROJECT" --zone="$ZONE" --command "sudo rm -f /tmp/platform.env.recreate" || true
+}
+
+restore_platform_env() {
+  local name="$1" src="$2"
+  gcloud compute scp "$src" "$name:/tmp/platform.env" --project="$PROJECT" --zone="$ZONE" || return 1
+  gcloud compute ssh "$name" --project="$PROJECT" --zone="$ZONE" --command \
+    "sudo mv /tmp/platform.env /root/platform.env && sudo chmod 600 /root/platform.env" || return 1
+}
+
+wait_vm_ssh() {
+  local name="$1" i
+  for i in $(seq 1 30); do
+    if gcloud compute ssh "$name" --project="$PROJECT" --zone="$ZONE" --command "true" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 10
+  done
+  echo "SSH to $name did not come up" >&2
+  return 1
+}
+
+recreate_vm() {
+  local role="$1"
+  local name private disk addr backup scopes
+  name="$(vm_for_role "$role")"
+  private="$(private_for_role "$role")"
+  disk="$(disk_for_role "$role")"
+  addr="${name}-ip"
+  backup="$(mktemp)"
+  chmod 600 "$backup"
+  echo ""
+  echo "===== recreate $name as e2-medium ====="
+  if gcloud compute instances describe "$name" --project="$PROJECT" --zone="$ZONE" --format='value(name)' >/dev/null 2>&1; then
+    echo "Saving /root/platform.env before the boot disk is deleted."
+    if ! save_platform_env "$name" "$backup"; then
+      echo "Refusing to delete $name because platform.env was not saved." >&2
+      rm -f "$backup"
+      return 1
+    fi
+    echo "Deleting $name and its boot disk. Static address $addr stays."
+    gcloud compute instances delete "$name" --project="$PROJECT" --zone="$ZONE" --quiet --delete-disks=boot || return 1
+  fi
+  if ! gcloud compute addresses describe "$addr" --project="$PROJECT" --region="$REGION" --format='value(address)' >/dev/null 2>&1; then
+    gcloud compute addresses create "$addr" --project="$PROJECT" --region="$REGION" || return 1
+  fi
+  scopes="https://www.googleapis.com/auth/devstorage.read_write,https://www.googleapis.com/auth/logging.write,https://www.googleapis.com/auth/monitoring.write,https://www.googleapis.com/auth/servicecontrol,https://www.googleapis.com/auth/service.management.readonly,https://www.googleapis.com/auth/trace.append"
+  gcloud compute instances create "$name" \
+    --project="$PROJECT" --zone="$ZONE" --machine-type=e2-medium \
+    --network-interface="network=platform-net,subnet=platform-subnet,private-network-ip=${private},address=${addr}" \
+    --image-family=ubuntu-2404-lts-amd64 --image-project=ubuntu-os-cloud \
+    --boot-disk-size="$disk" --boot-disk-type=pd-balanced \
+    --tags=platform-web --metadata=enable-oslogin=TRUE --scopes="$scopes" || return 1
+  wait_vm_ssh "$name" || return 1
+  if [ -s "$backup" ]; then
+    restore_platform_env "$name" "$backup" || return 1
+  fi
+  rm -f "$backup"
+}
+
 ensure_e2_medium() {
   local vm="$1" current state i
   current="$(gcloud compute instances describe "$vm" --project="$PROJECT" --zone="$ZONE" --format='value(machineType)' 2>/dev/null || true)"
@@ -193,8 +285,18 @@ ensure_e2_medium() {
   return 1
 }
 
-echo "Project $PROJECT zone $ZONE"
+echo "Project $PROJECT zone $ZONE machine e2-medium"
 echo "Private network: wesenseu 10.20.0.10, kitchcu 10.20.0.11, enterweu 10.20.0.12, monitour 10.20.0.13"
+if [ "$RECREATE" = "1" ]; then
+  echo "Recreate deletes each selected VM and its boot disk, keeps the static public address, then builds an e2-medium."
+  for item in "${VMS[@]}"; do
+    role="${item##* }"
+    if [ -n "$ONLY_ROLE" ] && [ "$role" != "$ONLY_ROLE" ]; then
+      continue
+    fi
+    recreate_vm "$role" || exit 1
+  done
+fi
 results=""
 ran=0
 ran_roles=""

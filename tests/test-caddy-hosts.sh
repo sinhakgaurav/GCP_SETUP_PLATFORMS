@@ -100,6 +100,9 @@ grep -q "wesenseu-files-1" "$ROOT/setup-all.sh" || fail "setup does not name the
 grep -q "===== Failure logs =====" "$ROOT/setup-all.sh" || fail "setup does not print failure logs"
 grep -q "machine-type=e2-medium" "$ROOT/setup-all.sh" || fail "setup does not resize every VM to e2-medium"
 grep -q "The boot disk stays." "$ROOT/setup-all.sh" || fail "resize does not say the boot disk is kept"
+grep -q "delete-disks=boot" "$ROOT/setup-all.sh" || fail "recreate does not delete only the boot disk"
+grep -q "Refusing to delete" "$ROOT/setup-all.sh" || fail "recreate can delete a VM before its env is saved"
+grep -q "addresses delete" "$ROOT/setup-all.sh" && fail "recreate deletes static addresses"
 grep -q 'Machine = "e2-small"' "$ROOT/deploy-all-platforms.ps1" && fail "a VM is still created as e2-small"
 grep -q "cdn-signing-key" "$ROOT/setup-all.sh" && fail "setup prints the CDN signing key file"
 
