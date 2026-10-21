@@ -215,6 +215,48 @@ set_kv() {
   chmod 600 "$file"
 }
 
+ensure_monitour_db_url() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+import sys
+import urllib.parse
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+vals = {}
+for line in text.splitlines():
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    vals[key.strip()] = value.strip().strip('"').strip("'")
+current = vals.get("DATABASE_URL", "")
+if current and "localhost" not in current and "127.0.0.1" not in current:
+    raise SystemExit(0)
+user = vals.get("POSTGRES_USER") or "monitour"
+password = vals.get("POSTGRES_PASSWORD") or "monitour_pg_password_change_me"
+database = vals.get("POSTGRES_DB") or "monitour_db"
+quoted = urllib.parse.quote(password, safe="")
+urls = {
+    "DATABASE_URL": f"postgresql+asyncpg://{user}:{quoted}@db:5432/{database}",
+    "SYNC_DATABASE_URL": f"postgresql://{user}:{quoted}@db:5432/{database}",
+}
+lines = []
+seen = set()
+for line in text.splitlines():
+    key = line.split("=", 1)[0] if "=" in line else ""
+    if key in urls:
+        lines.append(f"{key}={urls[key]}")
+        seen.add(key)
+    else:
+        lines.append(line)
+for key, value in urls.items():
+    if key not in seen:
+        lines.append(f"{key}={value}")
+path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+}
+
 env_value() {
   local file="$1" key="$2"
   grep "^${key}=" "$file" | head -n 1 | cut -d= -f2- || true
@@ -601,11 +643,12 @@ deploy_monitour() {
     update_repo /opt/monitour https://github.com/sinhakgaurav/monitour.git || return 1
     copy_env_once /opt/monitour/.env.platform /opt/monitour/.env.platform.monitour-only.example || return 1
   fi
-  set_kv "$env" WESENSEU_ENABLED "false"
+  set_kv "$env" WESENSEU_ENABLED "true"
   set_kv "$env" KAFKA_ENABLED "false"
   set_kv "$env" WESENSEU_API_URL "${WESENSEU_API_URL:-}"
   set_kv "$env" WESENSEU_API_KEY "${MONITOUR_API_KEY:-}"
   set_kv "$env" GOOGLE_MAPS_API_KEY "${GOOGLE_MAPS_API_KEY:-}"
+  ensure_monitour_db_url "$env" || return 1
   publish_env "$env" /opt/monitour/.env || return 1
   if [ "$MODE" = "https" ]; then
     log "Starting the Monitour app from images already on this VM."
@@ -626,8 +669,12 @@ deploy_monitour() {
   fi
   local ip web_hosts api_hosts
   ip=$(public_ip)
-  web_hosts=$(matching_hosts "$ip" monitour.in www.monitour.in)
-  api_hosts=$(matching_hosts "$ip" api.monitour.in)
+  web_hosts=$(matching_hosts "$ip" \
+    monitour.in www.monitour.in \
+    business.monitour.in admin.monitour.in sales.monitour.in \
+    guest.monitour.in book.monitour.in partner.monitour.in vendor.monitour.in \
+    app.monitour.in demo.monitour.in test.monitour.in s3.demo.monitour.in)
+  api_hosts=$(matching_hosts "$ip" api.monitour.in ingest.monitour.in vision.monitour.in)
   write_role_caddy "$ip" "${HOST_MONITOUR:-10.20.0.13}, monitour.internal" "127.0.0.1:8000" "127.0.0.1:3000" "$web_hosts" "$api_hosts"
   start_caddy || return 1
   wait_port80 || return 1

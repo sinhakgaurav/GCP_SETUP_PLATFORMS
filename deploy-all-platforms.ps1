@@ -9,7 +9,7 @@
 #   .\deploy-all-platforms.ps1 -PrintOnly
 
 param(
-    [string]$Project = "wesenseu",
+    [string]$Project = "narad-wesenseu",
     [string]$Zone = "asia-south1-a",
     [ValidateSet("deploy", "update", "status")]
     [string]$Action = "deploy",

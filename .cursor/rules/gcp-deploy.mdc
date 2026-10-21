@@ -1,0 +1,22 @@
+---
+description: Operate GCP with the gcloud CLI. GCP tasks may be committed without a test run.
+alwaysApply: true
+---
+
+# GCP deploy
+
+Deploy and inspect the four platforms with the Google Cloud CLI. Project `narad-wesenseu`, zone `asia-south1-a`, region `asia-south1`. Do not use project id `wesenseu`.
+
+On this PC there is no `gcloud.cmd`. Call:
+
+`C:\Python313\python.exe "C:\Users\Trouble Zone\Downloads\google-cloud-sdk\google-cloud-sdk\lib\gcloud.py" <args> --project=narad-wesenseu`
+
+`gcloud compute ssh` fails on this PC. Use OpenSSH: user `naradmuniconnect_gmail_com`, key `%USERPROFILE%\.ssh\wesenseu_oslogin`, `IdentitiesOnly=yes`, `BatchMode=yes`.
+
+Fleet: `wesenseu-medium` `10.20.0.10`, `kitchcu-small` `10.20.0.11`, `enterweu-small` `10.20.0.12`, `monitour-small` `10.20.0.13`. All are e2-medium. Read public IPs from `compute instances list`. Partners call `http://10.20.0.10`.
+
+Deploy scripts live in `E:/projects/GCP_SETUP_PLATFORMS`. Follow `.cursor/skills/gcp-deploy/SKILL.md` before changing a VM.
+
+While doing a task on GCP, you can commit without running test cases. That overrides the test-first gate for GCP deploy and VM work only. Do not commit secrets. Do not use `--no-verify`.
+
+Do not run `recreate` or delete boot disks unless the user says recreate. Do not wipe databases. Do not start the WesenseU vision worker or Kafka on a 4 GB VM. Do not print API keys, tokens, or passwords.
