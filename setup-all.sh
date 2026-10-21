@@ -164,6 +164,35 @@ vm_for_role() {
   esac
 }
 
+ensure_e2_medium() {
+  local vm="$1" current state i
+  current="$(gcloud compute instances describe "$vm" --project="$PROJECT" --zone="$ZONE" --format='value(machineType)' 2>/dev/null || true)"
+  if [ -z "$current" ]; then
+    echo "$vm was not found. This script does not create a new disk."
+    return 1
+  fi
+  case "$current" in
+    */e2-medium)
+      echo "$vm is already e2-medium"
+      return 0
+      ;;
+  esac
+  echo "Stopping $vm to change it to e2-medium. The boot disk stays."
+  gcloud compute instances stop "$vm" --project="$PROJECT" --zone="$ZONE" --quiet || return 1
+  gcloud compute instances set-machine-type "$vm" --project="$PROJECT" --zone="$ZONE" --machine-type=e2-medium || return 1
+  gcloud compute instances start "$vm" --project="$PROJECT" --zone="$ZONE" --quiet || return 1
+  for i in $(seq 1 24); do
+    state="$(gcloud compute instances describe "$vm" --project="$PROJECT" --zone="$ZONE" --format='value(status)' 2>/dev/null || true)"
+    if [ "$state" = "RUNNING" ] && gcloud compute ssh "$vm" --project="$PROJECT" --zone="$ZONE" --command="true" >/dev/null 2>&1; then
+      echo "$vm is e2-medium and accepting SSH"
+      return 0
+    fi
+    sleep 5
+  done
+  echo "$vm did not accept SSH after the resize"
+  return 1
+}
+
 echo "Project $PROJECT zone $ZONE"
 echo "Private network: wesenseu 10.20.0.10, kitchcu 10.20.0.11, enterweu 10.20.0.12, monitour 10.20.0.13"
 results=""
@@ -180,6 +209,11 @@ for item in "${VMS[@]}"; do
   ran_roles="${ran_roles} ${role}"
   echo ""
   echo "===== $role ($vm) ====="
+  if ! ensure_e2_medium "$vm"; then
+    line="RESULT role=$role setup=fail migrate=skipped https=skipped seed=skipped test=skipped weekly=skipped public=unknown private=unknown"
+    results="${results}${line}"$'\n'
+    continue
+  fi
   stamp_token "$vm" || true
   output="$(run_vm "$vm" "$role" 2>&1)" || true
   printf '%s\n' "$output"

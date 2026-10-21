@@ -41,9 +41,9 @@ $MapsKeyFile = Join-Path $Here "keys\maps-api-key"
 
 $Vms = @(
     @{ Role = "wesenseu"; Name = "wesenseu-medium"; Machine = "e2-medium"; Disk = "40GB"; PrivateIp = "10.20.0.10" },
-    @{ Role = "kitchcu"; Name = "kitchcu-small"; Machine = "e2-small"; Disk = "50GB"; PrivateIp = "10.20.0.11" },
-    @{ Role = "enterweu"; Name = "enterweu-small"; Machine = "e2-small"; Disk = "50GB"; PrivateIp = "10.20.0.12" },
-    @{ Role = "monitour"; Name = "monitour-small"; Machine = "e2-small"; Disk = "40GB"; PrivateIp = "10.20.0.13" }
+    @{ Role = "kitchcu"; Name = "kitchcu-small"; Machine = "e2-medium"; Disk = "50GB"; PrivateIp = "10.20.0.11" },
+    @{ Role = "enterweu"; Name = "enterweu-small"; Machine = "e2-medium"; Disk = "50GB"; PrivateIp = "10.20.0.12" },
+    @{ Role = "monitour"; Name = "monitour-small"; Machine = "e2-medium"; Disk = "40GB"; PrivateIp = "10.20.0.13" }
 )
 
 $RoleAlias = @{
@@ -378,8 +378,19 @@ function Ensure-Instance {
             "--tags=platform-web", "--metadata=enable-oslogin=TRUE", "--scopes=$scopes"
         )
     }
-    elseif ($state -eq "TERMINATED" -or $state -eq "STOPPED") {
-        Invoke-Gcloud @("compute", "instances", "start", $Vm.Name, "--project=$Project", "--zone=$Zone")
+    else {
+        $type = & gcloud compute instances describe $Vm.Name --project=$Project --zone=$Zone --format="value(machineType)" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $type -and $type -notmatch "/e2-medium$") {
+            Write-Host "Stopping $($Vm.Name) to change it to e2-medium. The boot disk stays."
+            if ($state -eq "RUNNING") {
+                Invoke-Gcloud @("compute", "instances", "stop", $Vm.Name, "--project=$Project", "--zone=$Zone", "--quiet")
+            }
+            Invoke-Gcloud @("compute", "instances", "set-machine-type", $Vm.Name, "--project=$Project", "--zone=$Zone", "--machine-type=e2-medium")
+            Invoke-Gcloud @("compute", "instances", "start", $Vm.Name, "--project=$Project", "--zone=$Zone")
+        }
+        elseif ($state -eq "TERMINATED" -or $state -eq "STOPPED") {
+            Invoke-Gcloud @("compute", "instances", "start", $Vm.Name, "--project=$Project", "--zone=$Zone")
+        }
     }
 }
 

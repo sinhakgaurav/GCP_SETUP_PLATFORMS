@@ -1,6 +1,6 @@
 # GCP setup for the four platforms
 
-One fresh Google Cloud project. kitchCU, EnterWeU, and Monitour each get an e2-small VM. WesenseU gets an e2-medium (4 GB). They share a private network and one private file CDN.
+One fresh Google Cloud project. Every app runs on an e2-medium (4 GB). They share a private network and one private file CDN. The VM names stay `kitchcu-small`, `enterweu-small`, and `monitour-small`. A rerun stops a smaller VM, sets e2-medium, and starts it again. Boot disks are kept.
 
 ```powershell
 .\deploy-all-platforms.ps1 -PrintOnly

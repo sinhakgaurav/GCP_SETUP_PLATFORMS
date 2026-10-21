@@ -98,6 +98,9 @@ grep -q "===== Live sites =====" "$ROOT/setup-all.sh" || fail "setup does not pr
 grep -q "https://files.wesenseu.com" "$ROOT/setup-all.sh" || fail "setup does not print the CDN link"
 grep -q "wesenseu-files-1" "$ROOT/setup-all.sh" || fail "setup does not name the CDN signing key"
 grep -q "===== Failure logs =====" "$ROOT/setup-all.sh" || fail "setup does not print failure logs"
+grep -q "machine-type=e2-medium" "$ROOT/setup-all.sh" || fail "setup does not resize every VM to e2-medium"
+grep -q "The boot disk stays." "$ROOT/setup-all.sh" || fail "resize does not say the boot disk is kept"
+grep -q 'Machine = "e2-small"' "$ROOT/deploy-all-platforms.ps1" && fail "a VM is still created as e2-small"
 grep -q "cdn-signing-key" "$ROOT/setup-all.sh" && fail "setup prints the CDN signing key file"
 
 echo "ok caddy-hosts"

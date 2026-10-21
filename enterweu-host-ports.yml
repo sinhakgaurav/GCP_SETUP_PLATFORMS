@@ -1,6 +1,6 @@
 # EnterWeU VM: Caddy owns 80 and 443. HAProxy stays on loopback.
 # Elasticsearch, Mongo, and Kafka stay in the "full" profile. Their memory
-# caps alone are larger than an e2-small, and a dead auth process makes nginx
+# caps alone are larger than this 4 GB VM, and a dead auth process makes nginx
 # return 502 on /api/auth/login/. Auth serves HTTP only; seeding is a separate step.
 # Requires Docker Compose v2.24 or newer for !override and !reset.
 
