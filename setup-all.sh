@@ -55,10 +55,121 @@ run_vm() {
     --command="sudo bash /tmp/vm-deploy-all.sh $role $ONLY_MODE"
 }
 
+PLATFORM_APIS="
+compute.googleapis.com
+storage.googleapis.com
+iam.googleapis.com
+cloudresourcemanager.googleapis.com
+serviceusage.googleapis.com
+oslogin.googleapis.com
+iap.googleapis.com
+logging.googleapis.com
+monitoring.googleapis.com
+certificatemanager.googleapis.com
+apikeys.googleapis.com
+geocoding-backend.googleapis.com
+places-backend.googleapis.com
+static-maps-backend.googleapis.com
+maps-backend.googleapis.com
+"
+
+print_enabled_services() {
+  local enabled api state
+  echo ""
+  echo "===== Enabled services ====="
+  enabled="$(gcloud services list --enabled --project="$PROJECT" --format='value(config.name)' 2>/dev/null || true)"
+  for api in $PLATFORM_APIS; do
+    state="missing"
+    if printf '%s\n' "$enabled" | grep -qx "$api"; then
+      state="enabled"
+    fi
+    printf '%-44s %s\n' "$api" "$state"
+  done
+}
+
+print_live_sites() {
+  local role url code
+  echo ""
+  echo "===== Live sites ====="
+  while read -r role url; do
+    [ -n "$role" ] || continue
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$url" 2>/dev/null || true)"
+    [ -n "$code" ] || code="err"
+    printf '%-12s %-44s %s\n' "$role" "$url" "$code"
+    case "$code" in
+      2??|3??|4??) ;;
+      *) live_bad="${live_bad} ${role}" ;;
+    esac
+  done <<'EOF'
+wesenseu https://wesenseu.com/health/live
+wesenseu https://api.wesenseu.com/health/live
+kitchcu https://kitchcu.com/
+kitchcu https://api.kitchcu.com/health/ready
+enterweu https://enterweu.com/
+enterweu https://api.enterweu.com/health/
+monitour https://monitour.in/
+monitour https://api.monitour.in/health
+EOF
+}
+
+print_cdn() {
+  local addr bucket backend keys
+  echo ""
+  echo "===== CDN ====="
+  addr="$(gcloud compute addresses describe wesenseu-files --project="$PROJECT" --global --format='value(address)' 2>/dev/null || true)"
+  bucket="$(gcloud storage buckets list --project="$PROJECT" --filter='name=wesenseu-invocations' --format='value(name)' 2>/dev/null || true)"
+  backend="$(gcloud compute backend-buckets describe wesenseu-files --project="$PROJECT" --format='value(name)' 2>/dev/null || true)"
+  keys="$(gcloud compute backend-buckets describe wesenseu-files --project="$PROJECT" --format='value(cdnPolicy.signedUrlKeyNames)' 2>/dev/null || true)"
+  echo "link      https://files.wesenseu.com"
+  echo "address   ${addr:-not created}"
+  echo "bucket    ${bucket:-not created}"
+  echo "backend   ${backend:-not created}"
+  echo "key name  wesenseu-files-1"
+  if printf '%s\n' "$keys" | grep -q 'wesenseu-files-1'; then
+    echo "key       present on the CDN backend"
+  else
+    echo "key       not attached"
+  fi
+  echo "access    The bucket is private. WesenseU returns a signed URL. Callers do not put an API key on that URL."
+  echo "dns       files.wesenseu.com is an A record for the CDN address above, not the WesenseU VM."
+}
+
+collect_failure_logs() {
+  local vm="$1"
+  echo ""
+  echo "===== Failure logs: $vm ====="
+  timeout 90 gcloud compute ssh "$vm" --project="$PROJECT" --zone="$ZONE" --command "sudo bash -s" <<'REMOTE' || echo "could not read logs from $vm"
+set +e
+echo "--- docker ps ---"
+docker ps -a --format '{{.Names}} {{.Status}}' | head -40
+echo "--- caddy ---"
+for name in $(docker ps -a --format '{{.Names}}' | grep -i caddy); do
+  echo "--- $name ---"
+  docker logs --tail 40 "$name" 2>&1 | tail -40
+done
+echo "--- exited ---"
+docker ps -aq --filter status=exited | head -6 | while read -r id; do
+  echo "--- $id ---"
+  docker logs --tail 20 "$id" 2>&1 | tail -20
+done
+REMOTE
+}
+
+vm_for_role() {
+  case "$1" in
+    wesenseu) printf '%s\n' wesenseu-medium ;;
+    kitchcu) printf '%s\n' kitchcu-small ;;
+    enterweu) printf '%s\n' enterweu-small ;;
+    monitour) printf '%s\n' monitour-small ;;
+  esac
+}
+
 echo "Project $PROJECT zone $ZONE"
 echo "Private network: wesenseu 10.20.0.10, kitchcu 10.20.0.11, enterweu 10.20.0.12, monitour 10.20.0.13"
 results=""
 ran=0
+ran_roles=""
+live_bad=""
 for item in "${VMS[@]}"; do
   vm="${item%% *}"
   role="${item##* }"
@@ -66,6 +177,7 @@ for item in "${VMS[@]}"; do
     continue
   fi
   ran=1
+  ran_roles="${ran_roles} ${role}"
   echo ""
   echo "===== $role ($vm) ====="
   stamp_token "$vm" || true
@@ -106,4 +218,33 @@ while IFS= read -r line; do
 done <<EOF
 $results
 EOF
+
+print_enabled_services
+print_live_sites
+print_cdn
+
+echo ""
+echo "===== Failure logs ====="
+logged=""
+for role in wesenseu kitchcu enterweu monitour; do
+  case " ${ran_roles} " in
+    *" ${role} "*) ;;
+    *) continue ;;
+  esac
+  need=0
+  if printf '%s\n' "$results" | grep -E "role=${role} " | grep -Eq 'setup=fail|migrate=fail|seed=fail|test=fail|weekly=fail'; then
+    need=1
+  fi
+  case " ${live_bad} " in
+    *" ${role} "*) need=1 ;;
+  esac
+  if [ "$need" -eq 1 ]; then
+    collect_failure_logs "$(vm_for_role "$role")"
+    logged=1
+  fi
+done
+if [ -z "$logged" ]; then
+  echo "none"
+fi
+
 exit "$failed"

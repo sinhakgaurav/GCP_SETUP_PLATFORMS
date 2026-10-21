@@ -93,5 +93,11 @@ grep -q "monitour-weekly-seed.timer" "$ROOT/vm-deploy-all.sh" || fail "Monitour 
 grep -q "already installed. Refreshing containers" "$ROOT/vm-deploy-all.sh" && fail "pipeline still skips the EnterWeU image rebuild"
 grep -q "wesenseu.com www.wesenseu.com" "$ROOT/vm-deploy-all.sh" || fail "wesenseu.com is not on the certificate list"
 grep -F -q 'enterweu_user:${POSTGRES_PASSWORD}@pgbouncer' "$ROOT/enterweu-host-ports.yml" || fail "EnterWeU still uses the hardcoded database password"
+grep -q "===== Enabled services =====" "$ROOT/setup-all.sh" || fail "setup does not list enabled services"
+grep -q "===== Live sites =====" "$ROOT/setup-all.sh" || fail "setup does not probe live sites"
+grep -q "https://files.wesenseu.com" "$ROOT/setup-all.sh" || fail "setup does not print the CDN link"
+grep -q "wesenseu-files-1" "$ROOT/setup-all.sh" || fail "setup does not name the CDN signing key"
+grep -q "===== Failure logs =====" "$ROOT/setup-all.sh" || fail "setup does not print failure logs"
+grep -q "cdn-signing-key" "$ROOT/setup-all.sh" && fail "setup prints the CDN signing key file"
 
 echo "ok caddy-hosts"
