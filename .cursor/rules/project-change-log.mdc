@@ -1,0 +1,18 @@
+---
+description: Record GCP script changes in this repo. Product tests stay with the owning platform.
+alwaysApply: true
+---
+
+# GCP scripts change log
+
+Before non-trivial work, grep this repo's `.cursor/activity-index.md` for 2–4 keywords. Open only the matching file under `.cursor/changes/`.
+
+After a script or fleet change, append one line to `.cursor/activity-index.md`:
+
+```
+YYYY-MM-DD | gcp | keywords | outcome | paths | evidence
+```
+
+Multi-file deploy work also gets `.cursor/changes/YYYY-MM-DD-slug.md` (under 40 lines). No secrets, keys, or passwords.
+
+A GCP or VM task skips product pre-commit tests, including after those changes are done. After the deploy, run `vm-test-seed.sh` and print each `CASE` plus the `RESULT` line. Record a product edit in the owning platform index. Do not copy product rules into this file.

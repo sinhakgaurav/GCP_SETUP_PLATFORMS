@@ -19,34 +19,63 @@ fi
 
 log() { echo "[$ROLE] $*"; }
 
+CASES=""
+note_case() {
+  local name="$1" result="$2" detail="$3"
+  log "CASE ${name} ${result} ${detail}"
+  CASES="${CASES}${name}=${result};"
+}
+
 http_ok() {
   local url="$1"
   curl -sf -o /dev/null --max-time 8 "$url"
 }
 
+probe() {
+  local name="$1" url="$2"
+  if http_ok "$url"; then
+    note_case "$name" pass "$url"
+    return 0
+  fi
+  note_case "$name" fail "$url"
+  return 1
+}
+
 health_of() {
   case "$ROLE" in
     wesenseu)
-      http_ok "http://127.0.0.1:8011/health/live" || http_ok "http://10.20.0.10/health/live"
+      probe live_local "http://127.0.0.1:8011/health/live" || probe live_private "http://10.20.0.10/health/live"
       ;;
     kitchcu)
-      curl -sf --max-time 8 "http://127.0.0.1:18000/health/ready" | grep -q '"status"'
+      local body
+      body=$(curl -sf --max-time 8 "http://127.0.0.1:18000/health/ready" || true)
+      if printf '%s' "$body" | grep -q '"status"'; then
+        note_case gateway_ready pass "http://127.0.0.1:18000/health/ready"
+        return 0
+      fi
+      note_case gateway_ready fail "http://127.0.0.1:18000/health/ready"
+      return 1
       ;;
     enterweu)
       code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8081/api/auth/login/ || true)
       case "$code" in
-        200|400|401|403|404|405) ;;
+        200|400|401|403|404|405)
+          note_case auth_login pass "http://127.0.0.1:8081/api/auth/login/ code=${code}"
+          ;;
         *)
-          log "auth login returned ${code:-down}"
+          note_case auth_login fail "http://127.0.0.1:8081/api/auth/login/ code=${code:-down}"
           return 1
           ;;
       esac
-      http_ok "http://127.0.0.1:3000/" || http_ok "http://127.0.0.1/"
+      probe web_local "http://127.0.0.1:3000/" || probe web_edge "http://127.0.0.1/"
       ;;
     monitour)
-      http_ok "http://127.0.0.1:8000/health/ready" || http_ok "http://127.0.0.1:8000/health" || http_ok "http://127.0.0.1:3000/"
+      probe api_ready "http://127.0.0.1:8000/health/ready" \
+        || probe api_health "http://127.0.0.1:8000/health" \
+        || probe web_local "http://127.0.0.1:3000/"
       ;;
     *)
+      note_case role fail "unknown"
       return 1
       ;;
   esac
@@ -56,10 +85,13 @@ partner_reach() {
   # Partners must reach WesenseU on the private network. WesenseU checks a partner is up.
   case "$ROLE" in
     wesenseu)
-      http_ok "http://10.20.0.12/" || http_ok "http://10.20.0.13/" || http_ok "http://10.20.0.11/"
+      probe peer_enterweu "http://10.20.0.12/" \
+        || probe peer_monitour "http://10.20.0.13/" \
+        || probe peer_kitchcu "http://10.20.0.11/"
       ;;
     *)
-      http_ok "http://10.20.0.10/health/live" || http_ok "http://10.20.0.10/api/kitchcu/v1/ping"
+      probe peer_wesenseu "http://10.20.0.10/health/live" \
+        || probe peer_wesenseu_kitchcu "http://10.20.0.10/api/kitchcu/v1/ping"
       ;;
   esac
 }
@@ -108,7 +140,9 @@ if [ "$ACTION" = "seed" ] || [ "$ACTION" = "both" ]; then
 fi
 
 log "health=$HEALTH seed=$SEED network=$NET"
-echo "RESULT role=$ROLE health=$HEALTH seed=$SEED network=$NET"
+echo "STATUS role=$ROLE health=$HEALTH seed=$SEED network=$NET"
+echo "CASES ${CASES}"
+echo "RESULT role=$ROLE health=$HEALTH seed=$SEED network=$NET cases=${CASES}"
 if [ "$HEALTH" != "ok" ]; then
   exit 1
 fi
