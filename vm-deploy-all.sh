@@ -1089,6 +1089,9 @@ run_deploy() {
       kitchcu)
         enable_weekly_timer /opt/ckac/infra/gcp-vm kitchcu-weekly-seed.service kitchcu-weekly-seed.timer && weekly="ok" || weekly="fail"
         ;;
+      wesenseu)
+        enable_weekly_timer /opt/wesenseu/infra/gcp wesenseu-weekly-seed.service wesenseu-weekly-seed.timer && weekly="ok" || weekly="fail"
+        ;;
     esac
   fi
   priv=$(curl -sf -H "Metadata-Flavor: Google" \
